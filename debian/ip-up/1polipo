@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -e
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+OPTION_FILE=/etc/polipo/options
+PPCTL=/usr/lib/polipo/polipo-control
+test -x $PPCTL  || exit 0
+
+# If noppp option is there, don't do anything here.
+if [ -f $OPTION_FILE ] && grep -qsx '^[[:blank:]]*noppp[[:blank:]]*$' $OPTION_FILE; then
+	exit 0
+fi
+
+$PPCTL go-online
+

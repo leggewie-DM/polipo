@@ -1,0 +1,10 @@
+-- Things that need fixing in this package
+
+* how to install /etc/polipo/options
+* document /etc/polipo/options
+* ip-up/down should probably check for the presence of a default route like
+  wwwoffle does
+
+-- Things that need fixing upstream
+
+* nothing!

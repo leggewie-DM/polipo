@@ -1,0 +1,3 @@
+var/cache/polipo
+var/run/polipo
+var/log/polipo

@@ -1,0 +1,207 @@
+polipo (0.9.8-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Mon, 24 Jan 2005 23:22:46 +0000
+
+polipo (0.9.7-2) unstable; urgency=low
+
+  * Apply lax HTTP parser patch so that Polipo continues to talk to servers
+    whose HTTP is buggy (closes: #265128)
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Fri, 14 Jan 2005 11:22:18 +0000
+
+polipo (0.9.7-1) unstable; urgency=low
+
+  * New upstream release
+  * /var/cache/polipo, /var/log/polipo and /var/run/polipo now have
+    permissions 750, for privacy  (closes: #283523, thanks to Hugo Haas)
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Mon, 27 Dec 2004 17:58:22 +0000
+
+polipo (0.9.6-1) unstable; urgency=low
+
+  * New upstream release (closes #277985, #265128)
+  * forbiddenFile can be a directory: fix polipo-control accordingly, closes #277929
+    (thanks to VSJ)
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Sun, 31 Oct 2004 19:32:21 +0000
+
+polipo (0.9.5-1) unstable; urgency=low
+
+  * New upstream release (closes: #253150, #253156)
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Mon, 21 Jun 2004 22:04:28 +0100
+
+polipo (0.9.4-3) unstable; urgency=low
+
+  * Append ".patch" suffix to "debian/patches/polipo--devel--0--patch-23",
+    so that it actually applies.
+  * polipo-control: Quote "`nameOfPID $PID`".  Thanks to Gergely Nagy,
+    closes: #251071
+  * Applied polipo--devel--0--patch-25 to fix char signedness issues. 
+    Thanks to Gergely Nagy, closes #250419
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Sun, 30 May 2004 22:20:36 +0100
+
+polipo (0.9.4-2) unstable; urgency=low
+
+  * Applied polipo--devel--0--patch-23 to fix 'connection->flags &
+    2' assertion bug
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Sun, 16 May 2004 10:34:41 +0100
+
+polipo (0.9.4-1) unstable; urgency=low
+
+  * New upstream release
+  * Renamed /etc/ppp/ip-up/down.d/polipo to /etc/ppp/ip-up/down.d/1polipo,
+    so that polipo comes online pretty soon after PPP is brought up,
+    closes: #249051
+  * Put polipo.ppp.ip-up/down in ip-up/down directories, because I'm now
+    using the name '1polipo' instead of 'polipo'.  A CDBS script I wrote
+    (debian/cdbs/ip-updown.mk) deals with installing these files.
+  * polipo.postinst: move ip-up/down.d/polipo to polipo.old,
+    because we are now using the name '1polipo', but we do not want to
+    delete a former conffile.  'polipo.old' will not be run by run-parts.
+  * Actually set the variable $OPTION_FILE in ip-up/down.d/polipo, instead
+    of stupidly leaving it dangling.
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Sat, 15 May 2004 11:04:36 +0100
+
+polipo (0.9.3-4) unstable; urgency=low
+
+  * Standards-Version: 3.6.1
+  * Lengthed package description, closes: #245160
+
+ -- Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Sun, 25 Apr 2004 12:25:26 +0100
+
+polipo (0.9.3-3) unstable; urgency=low
+
+  * Override DEB_MAKE_INVOKE, since the upstream Makefile expects CFLAGS to
+    be left untouched.  Fixes LOCAL_ROOT, DISK_CACHE_ROOT exchange bug.
+
+ -- Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Fri,  9 Apr 2004 21:45:17 +0100
+
+polipo (0.9.3-2) unstable; urgency=low
+
+  * Build system is now CDBS
+  * Added Build-Depends: debhelper (>= 4.1.0), cdbs
+  * CDBS: debian/cbds/helper-scripts.mk installs all the scripts in
+          debian/helper-scripts/$PACKAGE_NAME
+  * PATCH: Upstream request->ohandler crash bug patch
+
+ -- Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Thu,  8 Apr 2004 14:44:08 +0100
+
+polipo (0.9.3-1) unstable; urgency=low
+
+  * New upstream release
+  * /usr/lib/polipo/polipo-control removes stale pidfiles before running
+    polipo.  Now polipo will start even if the last one crashed.
+
+ -- Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Tue,  6 Apr 2004 22:06:41 +0100
+
+polipo (0.9.2-2) unstable; urgency=low
+
+  * Created /var/lib/polipo/polipo-control as an abstraction for starting,
+    stopping, going offline and online
+  * init.d and ppp.ip-up/down now use polipo-control
+
+ -- Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Tue, 30 Mar 2004 15:08:05 +0100
+
+polipo (0.9.2-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Mon, 29 Mar 2004 00:08:41 +0100
+
+polipo (0.9.1-1) unstable; urgency=low
+
+  * New upstream release
+
+ -- Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Fri, 12 Mar 2004 21:53:46 +0000
+
+polipo (0.9-2) unstable; urgency=low
+
+  * server.c: upstream patch to fix "Connection to (host) is broken" in
+    Konqueror
+
+ -- Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Sun,  7 Mar 2004 10:35:00 +0000
+
+polipo (0.9-1) unstable; urgency=low
+
+  * New upstream release
+  * Use in scripts: proxyOffline=true/false rather than proxyOffline=3/0. 
+    The latter is no longer valid.
+  * control/Build-Depends: added texinfo (for makeinfo)
+
+ -- Tom Ellis Huckstep <t.huckstep@bigfoot.com>  Sat, 21 Feb 2004 12:37:57 +0000
+
+polipo (0.8.4-1) unstable; urgency=low
+
+  * New upstream release
+  * init.d: fix off/online mode detection bug
+  * polipo.logrotate: reopen logfile with -USR1
+  * polipo.cron.daily: run purge command as user "proxy"
+  * polipo.ppp.ip-up/down: fix $HOME expansion bug
+
+ -- Tom Ellis Huckstep <t.huckstep@bigfoot.com>  Sun, 11 Jan 2004 13:15:03 +0000
+
+polipo (0.8.3-3) unstable; urgency=low
+
+  * polipo.cron.daily: redirect stdout of purge command to /dev/null. 
+    Closes another bug reported by Martin Bretschneider.
+  * init.d script now decides to start in online or offline mode by seeing
+    if the kernel has a default route.  It no longer takes
+    /etc/polipo/options into account.
+  * init.d script runs polipo with config file and forbidden file specified.
+    This fixes complaints about not being able to expand $HOME.
+  * cron.daily script runs polipo with config file and forbidden file
+    specified.  This fixes complaints about not being able to expand $HOME. 
+  * ip-up/down come into action unless "noppp" is specified in
+    /etc/polipo/options
+
+ -- Tom Ellis Huckstep <t.huckstep@bigfoot.com>  Sat, 27 Dec 2003 23:09:27 +0000
+
+polipo (0.8.3-2) unstable; urgency=low
+
+  * init.d script now decides whether to start in offline mode by looking at
+    /etc/polipo/options
+  * Added ip-up/down scripts to switch between offline and online modes
+  * Fixed bug in init.d/polipo: restart and force-reload targets now start
+    polipo as proxy:proxy rather than root:root
+  * Added cache purging to cron.daily
+  * Changed initscript S and K priorities to 30, because that's what 'oops'
+    has
+  * Decided on permissions polipo:polipo 644 for /var/log/polipo/*
+  * Create /var/log/polipo in postinst.  Closes bug reported by Martin
+    Bretschneider
+
+ -- Tom Ellis Huckstep <t.huckstep@bigfoot.com>  Tue, 23 Dec 2003 15:41:58 +0000
+
+polipo (0.8.3-1) unstable; urgency=low
+
+  * New upstream release
+  * rules install target is now install.binary
+  * init.d/polipo now uses the new daemonise and pidFile options to give
+    correct 'start' behaviour
+  * added a logrotate config
+
+ -- Tom Ellis Huckstep <t.huckstep@bigfoot.com>  Mon, 22 Dec 2003 00:09:16 +0000
+
+polipo (0.8.2-2) unstable; urgency=low
+
+  * Changed package synopsis and description in accordance with the
+    packaging manual best practices
+  * Use dh_installinfo and dh_installman instead of entries in the
+    upstream Makefile
+
+ -- Tom Ellis Huckstep <t.huckstep@bigfoot.com>  Wed, 17 Dec 2003 12:21:55 +0000
+
+polipo (0.8.2-1) unstable; urgency=low
+
+  * Initial Release.
+  * Changed the Makfile to install into DESTDIR
+  * Install the sample config file into /etc/polipo
+
+ -- Tom Ellis Huckstep <t.huckstep@bigfoot.com>  Sun, 14 Dec 2003 12:55:35 +0000
+

@@ -1,4 +1,5 @@
-PREFIX = /usr/local
+PREFIX = /usr
+TARGET = $(DESTDIR)
 BINDIR = $(PREFIX)/bin
 MANDIR = $(PREFIX)/man
 INFODIR = $(PREFIX)/info
@@ -47,7 +48,7 @@ FILE_DEFINES = -DLOCAL_ROOT=\"$(LOCAL_ROOT)/\" \
 
 DEFINES = $(FILE_DEFINES) $(PLATFORM_DEFINES)
 
-CFLAGS = $(MD5INCLUDES) $(CDEBUGFLAGS) $(DEFINES) $(EXTRA_DEFINES)
+override CFLAGS += $(MD5INCLUDES) $(CDEBUGFLAGS) $(DEFINES) $(EXTRA_DEFINES)
 
 SRCS = util.c event.c io.c chunk.c atom.c object.c log.c diskcache.c main.c \
        config.c local.c http.c client.c server.c auth.c tunnel.c \
@@ -74,10 +75,12 @@ install.binary: all
 	mkdir -p $(TARGET)$(BINDIR)
 	mkdir -p $(TARGET)$(LOCAL_ROOT)
 	mkdir -p $(TARGET)$(LOCAL_ROOT)/doc
+	mkdir -p $(TARGET)/etc/polipo
 	rm -f $(TARGET)$(BINDIR)/polipo
 	cp -f polipo $(TARGET)$(BINDIR)/
 	cp -f html/* $(TARGET)$(LOCAL_ROOT)/doc
 	cp -f localindex.html $(TARGET)$(LOCAL_ROOT)/index.html
+	cp -f config.sample $(TARGET)/etc/polipo/config
 
 install.man: all
 	mkdir -p $(TARGET)$(MANDIR)/man1
