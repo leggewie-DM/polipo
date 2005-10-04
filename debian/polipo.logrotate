@@ -5,6 +5,6 @@
         daily
         postrotate
 		PIDFILE=/var/run/polipo/polipo.pid
-		[ -f "$PIDFILE" ] && kill -USR1 $(cat "$PIDFILE")
+		if [ -f "$PIDFILE" ] ; then kill -USR1 $(cat "$PIDFILE") ; fi
         endscript
 }

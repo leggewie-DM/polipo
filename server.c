@@ -1457,17 +1457,16 @@ httpWriteRequest(HTTPConnectionPtr connection, HTTPRequestPtr request,
 
     n = snnprintf(connection->reqbuf, n, CHUNK_SIZE, " HTTP/1.1");
 
-    if(!connection->server->isProxy) {
-        n = snnprintf(connection->reqbuf, n, CHUNK_SIZE, "\r\nHost: ");
-        n = snnprint_n(connection->reqbuf, n, CHUNK_SIZE, url + x, y - x);
-        if(port != 80) {
-            n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
-                          ":%d", port);
-        }
-    } else {
-        if(parentAuthCredentials)
-            n = buildServerAuthHeaders(connection->reqbuf, n, CHUNK_SIZE,
-                                       parentAuthCredentials);
+    n = snnprintf(connection->reqbuf, n, CHUNK_SIZE, "\r\nHost: ");
+    n = snnprint_n(connection->reqbuf, n, CHUNK_SIZE, url + x, y - x);
+    if(port != 80) {
+        n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
+                      ":%d", port);
+    }
+
+    if(connection->server->isProxy && parentAuthCredentials) {
+        n = buildServerAuthHeaders(connection->reqbuf, n, CHUNK_SIZE,
+                                   parentAuthCredentials);
     }
 
     if(bodylen >= 0)
@@ -1830,6 +1829,7 @@ httpServerHandlerHeaders(int eof,
 
     if((code == 200 || code == 206 || code == 304 || code == 412) &&
        (cache_control.flags & (CACHE_NO | CACHE_NO_STORE) ||
+        cache_control.max_age == 0 ||
         (cacheIsShared && cache_control.s_maxage == 0) ||
         (expires >= 0 && expires <= object->age))) {
         do_log(L_UNCACHEABLE, "Uncacheable object ");
@@ -1945,7 +1945,8 @@ httpServerHandlerHeaders(int eof,
          (CACHE_NO_HIDDEN | CACHE_NO | CACHE_NO_STORE |
           (cacheIsShared ? CACHE_PRIVATE : 0))) ||
         (cache_control.max_age >= 0 && cache_control.max_age <= 2) ||
-        (cacheIsShared && cache_control.s_maxage <= 5) ||
+        (cacheIsShared && 
+         cache_control.s_maxage >= 0 && cache_control.s_maxage <= 5) ||
         (old_object->last_modified >= 0 && old_object->expires >= 0 && 
          (old_object->expires - old_object->last_modified <= 1)) ||
         (supersede && (old_object->date - date <= 5));
@@ -1959,6 +1960,7 @@ httpServerHandlerHeaders(int eof,
 
     new_object->age = age;
     new_object->cache_control |= cache_control.flags;
+    new_object->max_age = cache_control.max_age;
     new_object->s_maxage = cache_control.s_maxage;
     new_object->flags &= ~OBJECT_FAILED;
 
