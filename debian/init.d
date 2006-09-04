@@ -1,12 +1,14 @@
 #! /bin/sh
+### BEGIN INIT INFO
+# Provides:          polipo
+# Required-Start:    $local_fs
+# Required-Stop:     $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      S 0 1 6
+# Short-Description: Start or stop the polipo web cache
+### END INIT INFO
 #
-#		Written by Miquel van Smoorenburg <miquels@cistron.nl>.
-#		Modified for Debian 
-#		by Ian Murdock <imurdock@gnu.ai.mit.edu>.
-#		Modified for the Polipo Debian package
-#		by Tom Huckstep
-#
-# Version:	@(#)skeleton  1.9  26-Feb-2001  miquels@cistron.nl
+# Author:	Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>
 #
 
 set -e

@@ -3,7 +3,7 @@ Section: web
 Priority: optional
 Maintainer: Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>
 Build-Depends: debhelper (>= 4.1.0), cdbs, texinfo
-Standards-Version: 3.6.1
+Standards-Version: 3.7.2
 
 Package: polipo
 Architecture: any

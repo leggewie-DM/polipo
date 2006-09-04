@@ -4,10 +4,8 @@ Author: Juliusz Chroboczek
 Abstract: The Polipo web cache
 Section: web
 
-Format: debiandoc-sgml
-Files: /usr/share/doc/polipo/polipo.sgml.gz
-
 Format: Info
+Index: /usr/share/info/polipo.info.gz	
 Files: /usr/share/info/polipo.info.gz	
 
 Format: HTML

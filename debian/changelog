@@ -1,3 +1,14 @@
+polipo (0.9.10-1) unstable; urgency=low
+
+  * New upstream release (closes: #349942, #385751)
+  * Add 'Index' field to 'Info' section of doc-base control file
+    (closes: #372245)
+  * Remove debiandoc-sgml entry from doc-base control file.  This has never
+    existed, as far as I remember, and I don't know what it was doing there.
+  * Added LSB-compliant init script header
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Mon,  4 Sep 2006 13:51:33 +0100
+
 polipo (0.9.9-1) unstable; urgency=low
 
   * New upstream release (closes: #315655, #332411 CAN-2005-3163)
