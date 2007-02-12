@@ -1,3 +1,9 @@
+polipo (0.9.12-1) unstable; urgency=low
+
+  * New upstream release (closes: #405962, #409998, #405283, #402490)
+
+ -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Mon, 12 Feb 2007 14:29:39 +0000
+
 polipo (0.9.10-1) unstable; urgency=low
 
   * New upstream release (closes: #349942, #385751)

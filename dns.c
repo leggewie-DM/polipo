@@ -793,33 +793,33 @@ dnsTimeoutHandler(TimeEventHandlerPtr event)
     query->timeout = MAX(10, query->timeout * 2);
 
     if(query->timeout > dnsMaxTimeout) {
-        removeQuery(query);
         abortObject(object, 501, internAtom("Timeout"));
         goto fail;
     } else {
-        query->timeout_handler =
-            scheduleTimeEvent(query->timeout, dnsTimeoutHandler, 
-                              sizeof(query), &query);
-        if(query->timeout_handler == NULL) {
-            do_log(L_ERROR, "Couldn't schedule DNS timeout handler.\n");
-            abortObject(object, 501, 
-                        internAtom("Couldn't schedule DNS timeout handler"));
-            goto fail;
-        }
         rc = sendQuery(query);
         if(rc < 0) {
-            do_log(L_ERROR, "Couldn't send DNS query.\n");
             if(rc != -EWOULDBLOCK && rc != -EAGAIN && rc != -ENOBUFS) {
                 abortObject(object, 501,
-                            internAtom("Couldn't send DNS query"));
+                            internAtomError(-rc,
+                                            "Couldn't send DNS query"));
                 goto fail;
             }
             /* else let it timeout */
         }
+        query->timeout_handler =
+            scheduleTimeEvent(query->timeout, dnsTimeoutHandler,
+                              sizeof(query), &query);
+        if(query->timeout_handler == NULL) {
+            do_log(L_ERROR, "Couldn't schedule DNS timeout handler.\n");
+            abortObject(object, 501,
+                        internAtom("Couldn't schedule DNS timeout handler"));
+            goto fail;
+        }
         return 1;
     }
-            
- fail:        
+
+ fail:
+    removeQuery(query);
     object->flags &= ~OBJECT_INPROGRESS;
     if(query->inet4) releaseAtom(query->inet4);
     if(query->inet6) releaseAtom(query->inet6);
@@ -1236,6 +1236,7 @@ dnsGethostbynameFallback(int id, AtomPtr message)
                 query = previous->next;
                 break;
             }
+            previous = previous->next;
         }
         if(!query) {
             previous = NULL;
@@ -1311,7 +1312,7 @@ stringToLabels(char *buf, int offset, int n, char *string)
 #define DO_NTOHS(_d, _s) _d = ntohs(*(short*)(_s));
 #define DO_NTOHL(_d, _s) _d = ntohl(*(unsigned*)(_s))
 #define DO_HTONS(_d, _s) *(short*)(_d) = htons(_s);
-#define DO_HTONL(_d, _s) *(short*)(_d) = htonl(_s)
+#define DO_HTONL(_d, _s) *(unsigned*)(_d) = htonl(_s)
 #else
 #define DO_NTOHS(_d, _s) \
     do { short _dd; \
@@ -1326,9 +1327,9 @@ stringToLabels(char *buf, int offset, int n, char *string)
          _dd = htons(_s); \
          memcpy((_d), &(_dd), sizeof(unsigned short)); } while(0);
 #define DO_HTONL(_d, _s) \
-    do { unsigned long _dd; \
+    do { unsigned _dd; \
          _dd = htonl(_s); \
-         memcpy((_d), &(_dd), sizeof(unsigned long)); } while(0);
+         memcpy((_d), &(_dd), sizeof(unsigned)); } while(0);
 #endif
 
 static int
