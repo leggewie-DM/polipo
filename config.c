@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003, 2004 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,10 +20,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
 #include "polipo.h"
 
 ConfigVariablePtr configVariables = NULL;
@@ -42,9 +38,10 @@ findConfigVariable(AtomPtr name)
 }
 
 void
-declareConfigVariable(AtomPtr name, int type, void *value, char *help)
+declareConfigVariable(AtomPtr name, int type, void *value, 
+                      int (*setter)(ConfigVariablePtr, void*), char *help)
 {
-    ConfigVariablePtr var;
+    ConfigVariablePtr var, previous, next;
 
     var = findConfigVariable(name);
 
@@ -53,7 +50,7 @@ declareConfigVariable(AtomPtr name, int type, void *value, char *help)
                "Configuration variable %s declared multiple times.\n",
                name->string);
         if(var->type != type) {
-            abort();
+            exit(1);
         }
     }
 
@@ -66,21 +63,40 @@ declareConfigVariable(AtomPtr name, int type, void *value, char *help)
     var->name = retainAtom(name);
     var->type = type;
     switch(type) {
-    case CONFIG_INT: case CONFIG_OCTAL: case CONFIG_TIME:
+    case CONFIG_INT: case CONFIG_OCTAL: case CONFIG_HEX: case CONFIG_TIME:
     case CONFIG_BOOLEAN: case CONFIG_TRISTATE: case CONFIG_TETRASTATE:
     case CONFIG_PENTASTATE:
         var->value.i = value; break;
     case CONFIG_FLOAT: var->value.f = value; break;
-    case CONFIG_ATOM: case CONFIG_ATOM_LOWER: var->value.a = value; break;
+    case CONFIG_ATOM: case CONFIG_ATOM_LOWER: case CONFIG_PASSWORD:
+        var->value.a = value; break;
     case CONFIG_INT_LIST:
         var->value.il = value; break;
     case CONFIG_ATOM_LIST: case CONFIG_ATOM_LIST_LOWER: 
         var->value.al = value; break;
     default: abort();
     }
+    var->setter = setter;
     var->help = help;
-    var->next = configVariables;
-    configVariables = var;
+
+    previous = NULL;
+    next = configVariables;
+    while(next && strcmp(next->name->string, var->name->string) < 0) {
+        previous = next;
+        next = next->next;
+    }
+    if(next && strcmp(next->name->string, var->name->string) == 0) {
+        do_log(L_ERROR, "Variable %s declared multiple times.\n",
+               next->name->string);
+        abort();
+    }
+    if(previous == NULL) {
+        var->next = configVariables;
+        configVariables = var;
+    } else {
+        var->next = next;
+        previous->next = var;
+    }
 }
 
 static void
@@ -100,11 +116,243 @@ printString(FILE *out, char *string, int html)
     }
 }
 
+static void
+printVariable(FILE *out, ConfigVariablePtr var, int html, int parseable)
+{
+    int i;
+
+    switch(var->type) {
+    case CONFIG_INT: fprintf(out, "%d", *var->value.i); break;
+    case CONFIG_OCTAL: fprintf(out, "0%o", *var->value.i); break;
+    case CONFIG_HEX: fprintf(out, "0x%x", *var->value.i); break;
+    case CONFIG_TIME:
+        {
+            int v = *var->value.i;
+            if(v == 0) {
+                fprintf(out, "0s");
+            } else {
+                if(v >= 3600 * 24) fprintf(out, "%dd", v/(3600*24));
+                v = v % (3600 * 24);
+                if(v >= 3600) fprintf(out, "%dh", v / 3600);
+                v = v % 3600;
+                if(v >= 60) fprintf(out, "%dm", v / 60);
+                v = v % 60;
+                if(v > 0) fprintf(out, "%ds", v);
+            }
+        }
+        break;
+    case CONFIG_BOOLEAN:
+        switch(*var->value.i) {
+        case 0: fprintf(out, "false"); break;
+        case 1: fprintf(out, "true"); break;
+        default: fprintf(out, "???"); break;
+        }
+        break;
+    case CONFIG_TRISTATE:
+        switch(*var->value.i) {
+        case 0: fprintf(out, "false"); break;
+        case 1: fprintf(out, "maybe"); break;
+        case 2: fprintf(out, "true"); break;
+        default: fprintf(out, "???"); break;
+        }
+        break;
+    case CONFIG_TETRASTATE:
+        switch(*var->value.i) {
+        case 0: fprintf(out, "false"); break;
+        case 1: fprintf(out, "reluctantly"); break;
+        case 2: fprintf(out, "happily"); break;
+        case 3: fprintf(out, "true"); break;
+        default: fprintf(out, "???"); break;
+        }
+        break;
+    case CONFIG_PENTASTATE:
+        switch(*var->value.i) {
+        case 0: fprintf(out, "no"); break;
+        case 1: fprintf(out, "reluctantly"); break;
+        case 2: fprintf(out, "maybe"); break;
+        case 3: fprintf(out, "happily"); break;
+        case 4: fprintf(out, "true"); break;
+        default: fprintf(out, "???"); break;
+        }
+        break;
+    case CONFIG_FLOAT: fprintf(out, "%f", *var->value.f); break;
+    case CONFIG_ATOM: case CONFIG_ATOM_LOWER:
+        if(*var->value.a) {
+            if((*var->value.a)->length > 0) {
+                printString(out, (*var->value.a)->string, html);
+            } else {
+                if(!parseable)
+                    fprintf(out, "(empty)");
+            }
+        } else {
+            if(!parseable)
+                fprintf(out, "(none)");
+        }
+        break;
+    case CONFIG_PASSWORD:
+        if(!parseable)
+            fprintf(out, "(hidden)");
+        break;
+    case CONFIG_INT_LIST:
+        if((*var->value.il) == NULL) {
+            if(!parseable)
+                fprintf(out, "(not set)");
+        } else if((*var->value.il)->length == 0) {
+            if(!parseable)
+                fprintf(out, "(empty list)");
+        } else {
+            for(i = 0; i < (*var->value.il)->length; i++) {
+                int from = (*var->value.il)->ranges[i].from;
+                int to = (*var->value.il)->ranges[i].to;
+                assert(from <= to);
+                if(from == to)
+                    fprintf(out, "%d", from);
+                else
+                    fprintf(out, "%d-%d", from, to);
+                if(i < (*var->value.il)->length - 1)
+                    fprintf(out, ", ");
+            }
+        }
+        break;
+    case CONFIG_ATOM_LIST: case CONFIG_ATOM_LIST_LOWER:
+        if((*var->value.al) == NULL) {
+            if(!parseable)
+                fprintf(out, "(not set)");
+        } else if((*var->value.al)->length == 0) {
+            if(!parseable)
+                fprintf(out, "(empty list)");
+        } else {
+            for(i = 0; i < (*var->value.al)->length; i++) {
+                AtomPtr atom = (*var->value.al)->list[i];
+                if(atom) {
+                    if(atom->length > 0)
+                        printString(out, atom->string, html);
+                    else {
+                        if(!parseable)
+                            fprintf(out, "(empty)");
+                    }
+                } else {
+                    if(!parseable)
+                        fprintf(out, "(none)");
+                }
+                if(i < (*var->value.al)->length - 1)
+                    fprintf(out, ", ");
+            }
+        }
+        break;
+    default: abort();
+    }
+}
+
+static void
+printVariableForm(FILE *out, ConfigVariablePtr var)
+{
+    char *disabled = "";
+    int i;
+    
+    if(disableConfiguration || !var->setter) disabled = "disabled=true";
+
+    fprintf(out, "<form method=POST action=\"config?\">");
+  
+    switch(var->type) {
+    case CONFIG_INT: case CONFIG_OCTAL: case CONFIG_HEX:
+    case CONFIG_TIME: case CONFIG_FLOAT: case CONFIG_ATOM:
+    case CONFIG_ATOM_LOWER: case CONFIG_PASSWORD:
+    case CONFIG_INT_LIST: case CONFIG_ATOM_LIST: case CONFIG_ATOM_LIST_LOWER:
+        fprintf(out, "<input value=\"");
+        printVariable(out, var, 1, 1);
+        fprintf(out, "\"%s size=14 name=%s %s>\n",
+                var->type == CONFIG_PASSWORD ? " type=password" : "",
+                var->name->string, disabled);
+        break;
+
+    case CONFIG_BOOLEAN:
+        {
+            static char *states[] = {"false", "true"};
+            
+            fprintf(out, "<select name=%s %s>", var->name->string, disabled);
+            for(i=0; i < sizeof(states) / sizeof(states[0]); i++) {
+                if(*var->value.i == i) {
+                    fprintf(out, "<option selected>%s</option>", states[i]);
+                } else {
+                    fprintf(out, "<option>%s</option>", states[i]);
+                }
+            }
+            fprintf(out, "</select>");
+            if(var->setter)
+                fprintf(out, "<input type=\"submit\" value=\"set\"\n>");
+            break;
+        }
+    
+    case CONFIG_TRISTATE:
+        {
+            static char *states[] = {"false", "maybe", "true"};
+            
+            fprintf(out, "<select name=%s %s>", var->name->string, disabled);
+            for(i=0; i < sizeof(states) / sizeof(states[0]); i++) {
+                if(*var->value.i == i) {
+                    fprintf(out, "<option selected>%s</option>", states[i]);
+                } else {
+                    fprintf(out, "<option>%s</option>", states[i]);
+                }
+            }
+            fprintf(out, "</select>");
+            if(var->setter)
+                fprintf(out, "<input type=\"submit\" value=\"set\"\n>");
+            break;
+        }
+
+    case CONFIG_TETRASTATE:
+        {
+            static char *states[] =
+                {"false", "reluctantly", "happily", "true"};
+            
+            fprintf(out, "<select name=%s %s>", var->name->string, disabled);
+            for(i=0; i <sizeof(states) / sizeof(states[0]); i++) {
+                if(*var->value.i == i) {
+                    fprintf(out, "<option selected>%s</option>", states[i]);
+                } else {
+                    fprintf(out, "<option>%s</option>", states[i]);
+                }
+            }
+            fprintf(out, "</select>");
+            if(var->setter)
+                fprintf(out, "<input type=\"submit\" value=\"set\"\n>");
+            break;
+        }
+
+    case CONFIG_PENTASTATE:
+        {
+            static char *states[] =
+                {"no", "reluctantly", "maybe", "happily", "true"};
+
+            fprintf(out, "<select name=%s %s>", var->name->string, disabled);
+            for(i=0; i < sizeof(states) / sizeof(states[0]); i++) {
+                if(*var->value.i == i) {
+                    fprintf(out, "<option selected>%s</option>", states[i]);
+                } else {
+                    fprintf(out, "<option>%s</option>", states[i]);
+                }
+            }
+            fprintf(out, "</select>");
+            if(var->setter)
+                fprintf(out,"<input type=\"submit\" value=\"set\"\n>");
+            break;
+        }
+    default: abort();
+    }
+    fprintf(out, "</form>");
+}
+
+
+
+
+
 void
 printConfigVariables(FILE *out, int html)
 {
     ConfigVariablePtr var;
-    int i;
+    int entryno = 0;
 
 #define PRINT_SEP() \
     do {if(html) fprintf(out, "</td><td>"); else fprintf(out, " ");} while(0)
@@ -114,151 +362,89 @@ printConfigVariables(FILE *out, int html)
         fprintf(out, "<tbody>\n");
     }
 
+    if(html) {
+        alternatingHttpStyle(out, "configlist");
+        fprintf(out,
+                "<table id=configlist>\n"
+                "<thead>\n"
+                "<tr><th>variable name</th>"
+                "<th>current value</th>"
+                "<th>new value</th>"
+                "<th>description</th>\n"
+                "</thead><tbody>\n"
+);
+    }
+
+    /* configFile is not a config variable, for obvious bootstrapping reasons.
+       CHUNK_SIZE is hardwired for now. */
+
     fprintf(out,
-            html ?
-            "<tr><td>configFile</td><td>%s</td><td></td><td>"
-            "Configuration file.</td></tr>\n" :
-            "configFile %s Configuration file.\n",
-            configFile && configFile->length > 0 ? 
-            configFile->string : "(none)");
-    fprintf(out, 
-            html ?"<tr><td>CHUNK_SIZE</td><td>%d</td><td></td><td>"
-            "Unit of chunk memory allocation.</td></tr>\n" :
-            "CHUNK_SIZE %d Unit of chunk memory allocation.\n",
-            CHUNK_SIZE);
+	    html ?
+	    "<tr class=\"even\"><td>configFile</td><td>%s</td><td></td><td>"
+	    "Configuration file.</td></tr>\n" :
+	    "configFile %s Configuration file.\n",
+	    configFile && configFile->length > 0 ?
+	    configFile->string : "(none)");
+    fprintf(out,
+	    html ?
+	    "<tr class=\"odd\"><td>CHUNK_SIZE</td><td>%d</td><td></td><td>"
+	    "Unit of chunk memory allocation.</td></tr>\n" :
+	    "CHUNK_SIZE %d Unit of chunk memory allocation.\n", CHUNK_SIZE);
+    
     var = configVariables;
     while(var != NULL) {
-        fprintf(out, html ? "<tr><td>%s" : "%s", var->name->string);
-        PRINT_SEP();
-        switch(var->type) {
-        case CONFIG_INT: fprintf(out, "%d", *var->value.i); break;
-        case CONFIG_OCTAL: fprintf(out, "0%o", *var->value.i); break;
-        case CONFIG_TIME:
-            {
-                int v = *var->value.i;
-                if(v == 0) {
-                    fprintf(out, "0s");
-                } else {
-                    if(v >= 3600 * 24) fprintf(out, "%dd", v/(3600*24));
-                    v = v % (3600 * 24);
-                    if(v >= 3600) fprintf(out, "%dh", v / 3600);
-                    v = v % 3600;
-                    if(v >= 60) fprintf(out, "%dm", v / 60);
-                    v = v % 60;
-                    if(v > 0) fprintf(out, "%ds", v);
-                }
-            }
-            break;
-        case CONFIG_BOOLEAN:
-            switch(*var->value.i) {
-            case 0: fprintf(out, "false"); break;
-            case 1: fprintf(out, "true"); break;
-            default: fprintf(out, "???"); break;
-            }
-            break;
-        case CONFIG_TRISTATE:
-            switch(*var->value.i) {
-            case 0: fprintf(out, "false"); break;
-            case 1: fprintf(out, "maybe"); break;
-            case 2: fprintf(out, "true"); break;
-            default: fprintf(out, "???"); break;
-            }
-            break;
-        case CONFIG_TETRASTATE:
-            switch(*var->value.i) {
-            case 0: fprintf(out, "false"); break;
-            case 1: fprintf(out, "reluctantly"); break;
-            case 2: fprintf(out, "happily"); break;
-            case 3: fprintf(out, "true"); break;
-            default: fprintf(out, "???"); break;
-            }
-            break;
-        case CONFIG_PENTASTATE:
-            switch(*var->value.i) {
-            case 0: fprintf(out, "no"); break;
-            case 1: fprintf(out, "reluctantly"); break;
-            case 2: fprintf(out, "maybe"); break;
-            case 3: fprintf(out, "happily"); break;
-            case 4: fprintf(out, "true"); break;
-            default: fprintf(out, "???"); break;
-            }
-            break;
-        case CONFIG_FLOAT: fprintf(out, "%f", *var->value.f); break;
-        case CONFIG_ATOM: case CONFIG_ATOM_LOWER:
-            if(*var->value.a) {
-                if((*var->value.a)->length > 0)
-                    printString(out, (*var->value.a)->string, html);
-                else fprintf(out, "(empty)");
-            } else
-                fprintf(out, "(none)");
-            break;
-        case CONFIG_INT_LIST:
-            if((*var->value.il) == NULL)
-                fprintf(out, "(not set)");
-            else if((*var->value.il)->length == 0)
-                fprintf(out, "(empty list)");
-            else {
-                for(i = 0; i < (*var->value.il)->length; i++) {
-                    int from = (*var->value.il)->ranges[i].from;
-                    int to = (*var->value.il)->ranges[i].to;
-                    assert(from <= to);
-                    if(from == to)
-                        fprintf(out, "%d", from);
-                    else
-                        fprintf(out, "%d-%d", from, to);
-                    if(i < (*var->value.il)->length - 1)
-                        fprintf(out, ", ");
-                }
-            }
-            break;
-        case CONFIG_ATOM_LIST: case CONFIG_ATOM_LIST_LOWER:
-            if((*var->value.al) == NULL)
-                fprintf(out, "(not set)");
-            else if((*var->value.al)->length == 0)
-                fprintf(out, "(empty list)");
-            else {
-                for(i = 0; i < (*var->value.al)->length; i++) {
-                    AtomPtr atom = (*var->value.al)->list[i];
-                    if(atom) {
-                        if(atom->length > 0)
-                            printString(out, atom->string, html);
-                        else
-                            fprintf(out, "(empty)");
-                    } else
-                        fprintf(out, "(none)");
-                    if(i < (*var->value.al)->length - 1)
-                        fprintf(out, ", ");
-                }
-            }
-            break;
-        default: abort();
-        }
+      if(html) {
+          if(entryno % 2)
+              fprintf(out, "<tr class=odd>");
+          else
+              fprintf(out, "<tr class=even>");
+          fprintf(out, "<td>");
+      }
 
-        PRINT_SEP();
-        
-        switch(var->type) {
-        case CONFIG_INT: case CONFIG_OCTAL: fprintf(out, "integer"); break;
-        case CONFIG_TIME: fprintf(out, "time"); break;
-        case CONFIG_BOOLEAN: fprintf(out, "boolean"); break;
-        case CONFIG_TRISTATE: fprintf(out, "tristate"); break;
-        case CONFIG_TETRASTATE: fprintf(out, "4-state"); break;
-        case CONFIG_PENTASTATE: fprintf(out, "5-state"); break;
-        case CONFIG_FLOAT: fprintf(out, "float"); break;
-        case CONFIG_ATOM: case CONFIG_ATOM_LOWER: fprintf(out, "atom"); break;
-        case CONFIG_INT_LIST: fprintf(out, "intlist"); break;
-        case CONFIG_ATOM_LIST: case CONFIG_ATOM_LIST_LOWER:
-            fprintf(out, "list"); break;
-        default: abort();
-        }
-        
-        PRINT_SEP();
+      fprintf(out, "%s", var->name->string);
 
-        fprintf(out, "%s", var->help?var->help:"");
-        if(html)
-            fprintf(out, "</td></tr>\n");
-        else
-            fprintf(out, "\n");
-        var = var->next;
+      fprintf(out, html ? "<br/>" : " "); 
+      
+      fprintf(out, html ? "<i>" : "");    
+      
+      switch(var->type) {
+      case CONFIG_INT: case CONFIG_OCTAL: case CONFIG_HEX:
+	  fprintf(out, "integer"); break;
+      case CONFIG_TIME: fprintf(out, "time"); break;
+      case CONFIG_BOOLEAN: fprintf(out, "boolean"); break;
+      case CONFIG_TRISTATE: fprintf(out, "tristate"); break;
+      case CONFIG_TETRASTATE: fprintf(out, "4-state"); break;
+      case CONFIG_PENTASTATE: fprintf(out, "5-state"); break;
+      case CONFIG_FLOAT: fprintf(out, "float"); break;
+      case CONFIG_ATOM: case CONFIG_ATOM_LOWER: case CONFIG_PASSWORD:
+          fprintf(out, "atom"); break;
+      case CONFIG_INT_LIST: fprintf(out, "intlist"); break;
+      case CONFIG_ATOM_LIST: case CONFIG_ATOM_LIST_LOWER:
+	  fprintf(out, "list"); break;
+      default: abort();
+      }
+        
+      fprintf(out, html ? "</i>" : "");
+
+      PRINT_SEP();
+
+      printVariable(out, var, html, 0);
+
+      PRINT_SEP();
+	
+      if(html) {
+	printVariableForm(out, var);
+	PRINT_SEP();
+      }
+
+      fprintf(out, "%s", var->help?var->help:"");
+      if(html)
+	fprintf(out, "</td></tr>\n");
+      else
+	fprintf(out, "\n");
+
+      entryno++;
+      var = var->next;
     }
     if(html) {
         fprintf(out, "</tbody>\n");
@@ -433,14 +619,18 @@ parseTime(char *line, int i, int *value_return)
     return i;
 }
 
-        
 int
-parseConfigLine(char *line, char *filename, int lineno)
+parseConfigLine(char *line, char *filename, int lineno, int set)
 {
     int x0, x1;
     int i, from, to;
     AtomPtr name, value;
     ConfigVariablePtr var;
+    int iv;
+    float fv;
+    AtomPtr av;
+    AtomListPtr alv;
+    IntListPtr ilv;
 
     i = skipWhitespace(line, 0);
     if(line[i] == '\n' || line[i] == '\0' || line[i] == '#')
@@ -461,60 +651,89 @@ parseConfigLine(char *line, char *filename, int lineno)
     name = internAtomN(line + x0, x1 - x0);
     var = findConfigVariable(name);
     releaseAtom(name);
+
+    if(set && var->setter == NULL)
+        return -2;
  
     if(var == NULL) {
-        do_log(L_ERROR, "%s:%d: unknown config variable ", filename, lineno);
-        do_log_n(L_ERROR, line + x0, x1 - x0);
-        do_log(L_ERROR, "\n");
+        if(!set) {
+            do_log(L_ERROR, "%s:%d: unknown config variable ",
+                   filename, lineno);
+            do_log_n(L_ERROR, line + x0, x1 - x0);
+            do_log(L_ERROR, "\n");
+        }
         return -1;
     }
     
     i = skipWhitespace(line, i);
     switch(var->type) {
-    case CONFIG_INT: case CONFIG_OCTAL:
-        i = parseInt(line, i, var->value.i);
+    case CONFIG_INT: case CONFIG_OCTAL: case CONFIG_HEX:
+        i = parseInt(line, i, &iv);
         if(i < 0) goto syntax;
-        break;
+        if(set)
+            var->setter(var, &iv);
+        else
+            *var->value.i = iv;
+    break;
     case CONFIG_TIME:
-        i = parseTime(line, i, var->value.i);
+        i = parseTime(line, i, &iv);
         if(i < 0) goto syntax;
         i = skipWhitespace(line, i);
         if(line[i] != '\n' && line[i] != '\0' && line[i] != '#')
             goto syntax;
+        if(set)
+            var->setter(var, &iv);
+        else
+            *var->value.i = iv;
         break;
     case CONFIG_BOOLEAN:
     case CONFIG_TRISTATE:
     case CONFIG_TETRASTATE:
     case CONFIG_PENTASTATE:
-        *var->value.i = parseState(line, i, var->type);
-        if(*var->value.i < 0)
+        iv = parseState(line, i, var->type);
+        if(iv < 0)
             goto syntax;
+        if(set)
+            var->setter(var, &iv);
+        else
+            *var->value.i = iv;
         break;
     case CONFIG_FLOAT: 
         if(!digit(line[i]) && line[i] != '.')
             goto syntax;
-        *var->value.f = atof(line + i);
+        fv = atof(line + i);
+        if(set)
+            var->setter(var, &fv);
+        else
+            *var->value.f = fv;
         break;
-    case CONFIG_ATOM: case CONFIG_ATOM_LOWER:
-        i = parseAtom(line, i, &value, (var->type == CONFIG_ATOM_LOWER));
+    case CONFIG_ATOM: case CONFIG_ATOM_LOWER: case CONFIG_PASSWORD:
+        i = parseAtom(line, i, &av, (var->type == CONFIG_ATOM_LOWER));
         if(i < 0) goto syntax;
-        if(!value) {
-            do_log(L_ERROR, "%s:%d: couldn't allocate atom.\n",
-                   filename, lineno);
+        if(!av) {
+            if(!set)
+                do_log(L_ERROR, "%s:%d: couldn't allocate atom.\n",
+                       filename, lineno);
             return -1;
         }
         i = skipWhitespace(line, i);
-        if(line[i] != '\n' && line[i] != '\0' && line[i] != '#')
+        if(line[i] != '\n' && line[i] != '\0' && line[i] != '#') {
+            releaseAtom(av);
             goto syntax;
-        if(*var->value.a) releaseAtom(*var->value.a);
-        *var->value.a = value;
+        }
+        if(set)
+            var->setter(var, &av);
+        else {
+            if(*var->value.a) releaseAtom(*var->value.a);
+            *var->value.a = av;
+        }
         break;
     case CONFIG_INT_LIST:
-        if(*var->value.il) destroyIntList(*var->value.il);
-        *var->value.il = makeIntList(0);
-        if(*var->value.il == NULL) {
-            do_log(L_ERROR, "%s:%d: couldn't allocate int list.\n",
-                   filename, lineno);
+        ilv = makeIntList(0);
+        if(ilv == NULL) {
+            if(!set)
+                do_log(L_ERROR, "%s:%d: couldn't allocate int list.\n",
+                       filename, lineno);
             return -1;
         }
         while(1) {
@@ -525,23 +744,34 @@ parseConfigLine(char *line, char *filename, int lineno)
             if(line[i] == '-') {
                 i = skipWhitespace(line, i + 1);
                 i = parseInt(line, i, &to);
-                if(i < 0) goto syntax;
+                if(i < 0) {
+                    destroyIntList(ilv);
+                    goto syntax;
+                }
                 i = skipWhitespace(line, i);
             }
-            intListCons(from, to, *var->value.il);
+            intListCons(from, to, ilv);
             if(line[i] == '\n' || line[i] == '\0' || line[i] == '#')
                 break;
-            if(line[i] != ',')
+            if(line[i] != ',') {
+                destroyIntList(ilv);
                 goto syntax;
+            }
             i = skipWhitespace(line, i + 1);
+        }
+        if(set)
+            var->setter(var, &ilv);
+        else {
+            if(*var->value.il) destroyIntList(*var->value.il);
+            *var->value.il = ilv;
         }
         break;
     case CONFIG_ATOM_LIST: case CONFIG_ATOM_LIST_LOWER:
-        if(*var->value.al) destroyAtomList(*var->value.al);
-        *var->value.al = makeAtomList(NULL, 0);
-        if(*var->value.al == NULL) {
-            do_log(L_ERROR, "%s:%d: couldn't allocate atom list.\n",
-                   filename, lineno);
+        alv = makeAtomList(NULL, 0);
+        if(alv == NULL) {
+            if(!set)
+                do_log(L_ERROR, "%s:%d: couldn't allocate atom list.\n",
+                       filename, lineno);
             return -1;
         }
         while(1) {
@@ -549,17 +779,26 @@ parseConfigLine(char *line, char *filename, int lineno)
                           (var->type == CONFIG_ATOM_LIST_LOWER));
             if(i < 0) goto syntax;
             if(!value) {
-                do_log(L_ERROR, "%s:%d: couldn't allocate atom.\n",
-                       filename, lineno);
+                if(!set)
+                    do_log(L_ERROR, "%s:%d: couldn't allocate atom.\n",
+                           filename, lineno);
                 return -1;
             }
-            atomListCons(value, *var->value.al);
+            atomListCons(value, alv);
             i = skipWhitespace(line, i);
             if(line[i] == '\n' || line[i] == '\0' || line[i] == '#')
                 break;
-            if(line[i] != ',')
+            if(line[i] != ',') {
+                destroyAtomList(alv);
                 goto syntax;
+            }
             i = skipWhitespace(line, i + 1);
+        }
+        if(set)
+            var->setter(var, &alv);
+        else {
+            if(*var->value.al) destroyAtomList(*var->value.al);
+            *var->value.al = alv;
         }
         break;
     default: abort();
@@ -567,7 +806,8 @@ parseConfigLine(char *line, char *filename, int lineno)
     return 1;
 
  syntax:
-    do_log(L_ERROR, "%s:%d: parse error.\n", filename, lineno);
+    if(!set)
+        do_log(L_ERROR, "%s:%d: parse error.\n", filename, lineno);
     return -1;
 }
 
@@ -595,7 +835,35 @@ parseConfigFile(AtomPtr filename)
             fclose(f);
             return 1;
         }
-        rc = parseConfigLine(buf, filename->string, lineno);
+        rc = parseConfigLine(buf, filename->string, lineno, 0);
         lineno++;
     }
+}
+
+int
+configIntSetter(ConfigVariablePtr var, void* value)
+{
+    assert(var->type <= CONFIG_PENTASTATE);
+    *var->value.i = *(int*)value;
+    return 1;
+}
+
+int
+configFloatSetter(ConfigVariablePtr var, void* value)
+{
+    assert(var->type == CONFIG_FLOAT);
+    *var->value.i = *(float*)value;
+    return 1;
+}
+
+
+int
+configAtomSetter(ConfigVariablePtr var, void* value)
+{
+    assert(var->type == CONFIG_ATOM || var->type == CONFIG_ATOM_LOWER ||
+           var->type == CONFIG_PASSWORD);
+    if(*var->value.a)
+        releaseAtom(*var->value.a);
+    *var->value.a = *(AtomPtr*)value;
+    return 1;
 }

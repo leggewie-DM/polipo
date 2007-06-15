@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,9 +22,35 @@ THE SOFTWARE.
 
 #include "polipo.h"
 
+#ifdef HAVE_IPv6
+#ifdef IPV6_PREFER_TEMPADDR
+#define HAVE_IPV6_PREFER_TEMPADDR 1
+#endif
+#endif
+
+#ifdef HAVE_IPV6_PREFER_TEMPADDR
+int useTemporarySourceAddress = 1;
+#endif
+
 void
 preinitIo()
 {
+#ifdef HAVE_IPV6_PREFER_TEMPADDR
+    CONFIG_VARIABLE_SETTABLE(useTemporarySourceAddress, CONFIG_TRISTATE,
+                             configIntSetter,
+                             "Prefer IPv6 temporary source address.");
+#endif
+
+#ifdef HAVE_WINSOCK
+    /* Load the winsock dll */
+    WSADATA wsaData;
+    WORD wVersionRequested = MAKEWORD(2, 2);
+    int err = WSAStartup( wVersionRequested, &wsaData );
+    if (err != 0) {
+        do_log_error(L_ERROR, err, "Couldn't load winsock dll");
+        exit(-1);
+    }
+#endif
     return;
 }
 
@@ -326,14 +352,14 @@ do_scheduled_stream(int status, FdEventHandlerPtr event)
 
     if((request->operation & IO_MASK) == IO_WRITE) {
         if(i > 1) 
-            rc = writev(request->fd, iov, i);
+            rc = WRITEV(request->fd, iov, i);
         else
-            rc = write(request->fd, iov[0].iov_base, iov[0].iov_len);
+            rc = WRITE(request->fd, iov[0].iov_base, iov[0].iov_len);
     } else {
         if(i > 1) 
-            rc = readv(request->fd, iov, i);
+            rc = READV(request->fd, iov, i);
         else
-            rc = read(request->fd, iov[0].iov_base, iov[0].iov_len);
+            rc = READ(request->fd, iov[0].iov_base, iov[0].iov_len);
     }
 
     if(rc > 0) {
@@ -399,10 +425,23 @@ serverSocket(int af)
         rc = setNonblocking(fd, 1);
         if(rc < 0) {
             int errno_save = errno;
-            close(fd);
+            CLOSE(fd);
             errno = errno_save;
             return -1;
         }
+#ifdef HAVE_IPV6_PREFER_TEMPADDR
+	if (af == 6 && useTemporarySourceAddress != 1) {
+            int value;
+            value = (useTemporarySourceAddress == 2) ? 1 : 0;
+            rc = setsockopt(fd, IPPROTO_IPV6, IPV6_PREFER_TEMPADDR,
+                            &value, sizeof(value));
+            if (rc < 0) {
+                /* no error, warning only */
+                do_log_error(L_WARN, errno, "Couldn't set IPV6CTL_USETEMPADDR");
+            }
+	}
+
+#endif
     }
     return fd;
 }
@@ -448,8 +487,9 @@ do_connect(AtomPtr addr, int index, int port,
         assert(done);
         return NULL;
     }
-    
-    event = registerFdEvent(fd, POLLOUT,
+
+    /* POLLIN is apparently needed on Windows */
+    event = registerFdEvent(fd, POLLIN | POLLOUT,
                             do_scheduled_connect,
                             sizeof(ConnectRequestRec), &request);
     if(event == NULL) {
@@ -501,7 +541,7 @@ do_scheduled_connect(int status, FdEventHandlerPtr event)
         int newfd;
         /* Ouch.  Our socket has a different protocol than the host
            address. */
-        close(request->fd);
+        CLOSE(request->fd);
         newfd = serverSocket(host->af);
         if(newfd < 0) {
             if(errno == EAFNOSUPPORT || errno == EPROTONOSUPPORT) {
@@ -518,7 +558,7 @@ do_scheduled_connect(int status, FdEventHandlerPtr event)
         }
         if(newfd != request->fd) {
             request->fd = dup2(newfd, request->fd);
-            close(newfd);
+            CLOSE(newfd);
             if(request->fd < 0) {
                 done = request->handler(-errno, event, request);
                 assert(done);
@@ -724,7 +764,7 @@ create_listener(char *address, int port,
 
     if(rc < 0) {
         do_log_error(L_ERROR, errno, "Couldn't bind");
-        close(fd);
+        CLOSE(fd);
         done = (*handler)(-errno, NULL, NULL);
         assert(done);
         return NULL;
@@ -733,7 +773,7 @@ create_listener(char *address, int port,
     rc = setNonblocking(fd, 1);
     if(rc < 0) {
         do_log_error(L_ERROR, errno, "Couldn't set non blocking mode");
-        close(fd);
+        CLOSE(fd);
         done = (*handler)(-errno, NULL, NULL);
         assert(done);
         return NULL;
@@ -742,18 +782,28 @@ create_listener(char *address, int port,
     rc = listen(fd, 32);
     if(rc < 0) {
         do_log_error(L_ERROR, errno, "Couldn't listen");
-        close(fd);
+        CLOSE(fd);
         done = (*handler)(-errno, NULL, NULL);
         assert(done);
         return NULL;
     }
-        
+
+    do_log(L_INFO, "Established listening socket on port %d.\n", port);
+
     return schedule_accept(fd, handler, data);
 }
+
+#ifndef SOL_TCP
+/* BSD */
+#define SOL_TCP IPPROTO_TCP
+#endif
 
 int
 setNonblocking(int fd, int nonblocking)
 {
+#ifdef MINGW
+    return mingw_setnonblocking(fd, nonblocking);
+#else
     int rc;
     rc = fcntl(fd, F_GETFL, 0);
     if(rc < 0)
@@ -764,12 +814,8 @@ setNonblocking(int fd, int nonblocking)
         return -1;
 
     return 0;
-}
-
-#ifndef SOL_TCP
-/* BSD */
-#define SOL_TCP IPPROTO_TCP
 #endif
+}
 
 int
 setNodelay(int fd, int nodelay)
@@ -816,7 +862,7 @@ lingeringCloseTimeoutHandler(TimeEventHandlerPtr event)
     if(l->handler)
         pokeFdEvent(l->fd, -ESHUTDOWN, POLLIN | POLLOUT);
     else {
-        close(l->fd);
+        CLOSE(l->fd);
         free(l);
     }
     return 1;
@@ -835,7 +881,7 @@ lingeringCloseHandler(int status, FdEventHandlerPtr event)
     if(status && status != -EDOGRACEFUL)
         goto done;
 
-    rc = read(l->fd, &buf, 17);
+    rc = READ(l->fd, &buf, 17);
     if(rc == 0 || (rc < 0 && errno != EAGAIN && errno != EINTR))
         goto done;
 
@@ -849,7 +895,7 @@ lingeringCloseHandler(int status, FdEventHandlerPtr event)
         cancelTimeEvent(l->timeout);
         l->timeout = NULL;
     }
-    close(l->fd);
+    CLOSE(l->fd);
     free(l);
     return 1;
 }
@@ -867,7 +913,7 @@ lingeringClose(int fd)
         } else if(errno == EFAULT || errno == EBADF) {
             abort();
         }
-        close(fd);
+        CLOSE(fd);
         return 1;
     }
 
@@ -896,7 +942,7 @@ lingeringClose(int fd)
 
  fail:
     do_log(L_ERROR, "Couldn't schedule lingering close.\n");
-    close(fd);
+    CLOSE(fd);
     return 1;
 }
 
@@ -988,6 +1034,7 @@ parseNetAddress(AtomListPtr list)
     return NULL;
 }
 
+/* Returns 1 if the first n bits of a and b are equal */
 static int
 bitmatch(const unsigned char *a, const unsigned char *b, int n)
 {
@@ -1005,12 +1052,13 @@ bitmatch(const unsigned char *a, const unsigned char *b, int n)
     return 1;
 }
 
+/* Returns 1 if the address in data is in list */
 static int
-match(int af, char *data, NetAddressPtr list)
+match(int af, unsigned char *data, NetAddressPtr list)
 {
     int i;
 #ifdef HAVE_IPv6
-    static const char v6mapped[] =
+    static const unsigned char v6mapped[] =
         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF };
 #endif
 
@@ -1051,7 +1099,7 @@ int
 netAddressMatch(int fd, NetAddressPtr list)
 {
     int rc;
-    int len;
+    unsigned int len;
     struct sockaddr_in sain;
 #ifdef HAVE_IPv6
     struct sockaddr_in6 sain6;
@@ -1065,7 +1113,7 @@ netAddressMatch(int fd, NetAddressPtr list)
     }
 
     if(sain.sin_family == AF_INET) {
-        return match(4, (char*)&sain.sin_addr, list);
+        return match(4, (unsigned char*)&sain.sin_addr, list);
 #ifdef HAVE_IPv6
     } else if(sain.sin_family == AF_INET6) {
         len = sizeof(sain6);
@@ -1078,7 +1126,7 @@ netAddressMatch(int fd, NetAddressPtr list)
             do_log(L_ERROR, "Inconsistent peer name");
             return -1;
         }
-        return match(6, (char*)&sain6.sin6_addr, list);
+        return match(6, (unsigned char*)&sain6.sin6_addr, list);
 #endif
     } else {
         do_log(L_ERROR, "Unknown address family %d\n", sain.sin_family);

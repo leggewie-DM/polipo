@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2004-2006 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,5 +20,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-int checkClientAuth(AtomPtr, AtomPtr, AtomPtr*, AtomPtr*);
-int buildServerAuthHeaders(char*, int, int, AtomPtr);
+extern AtomPtr socksParentProxy;
+
+typedef struct _SocksRequest {
+    AtomPtr name;
+    int port;
+    int fd;
+    int (*handler)(int, struct _SocksRequest*);
+    char *buf;
+    void *data;
+} SocksRequestRec, *SocksRequestPtr;
+
+void preinitSocks(void);
+void initSocks(void);
+int do_socks_connect(char*, int, int (*)(int, SocksRequestPtr), void*);

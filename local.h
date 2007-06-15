@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003, 2004 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -28,10 +28,21 @@ typedef struct _SpecialRequest {
     pid_t pid;
 } SpecialRequestRec, *SpecialRequestPtr;
 
+extern int disableConfiguration;
+extern int disableIndexing;
+
 void preinitLocal(void);
+void alternatingHttpStyle(FILE *out, char *id);
 int httpLocalRequest(ObjectPtr object, int method, int from, int to,
                      HTTPRequestPtr, void *);
 int httpSpecialRequest(ObjectPtr object, int method, int from, int to,
                        HTTPRequestPtr, void*);
+int httpSpecialSideRequest(ObjectPtr object, int method, int from, int to,
+                           HTTPRequestPtr requestor, void *closure);
 int specialRequestHandler(int status, 
                           FdEventHandlerPtr event, StreamRequestPtr request);
+int httpSpecialDoSide(HTTPRequestPtr requestor);
+int httpSpecialClientSideHandler(int status,
+                                 FdEventHandlerPtr event,
+                                 StreamRequestPtr srequest);
+int httpSpecialDoSideFinish(AtomPtr data, HTTPRequestPtr requestor);

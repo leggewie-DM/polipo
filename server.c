@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003, 2004 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -28,34 +28,43 @@ int replyUnpipelineTime = 20;
 int replyUnpipelineSize = 1024 * 1024;
 int pipelineAdditionalRequests = 1;
 int maxPipelineTrain = 10;
+AtomPtr parentProxy = NULL;
 AtomPtr parentHost = NULL;
-int parentPort = 8123;
+int parentPort = -1;
 int pmmFirstSize = 0, pmmSize = 0;
 int serverSlots = 2;
-int serverMaxSlots = 4;
+int serverMaxSlots = 8;
+int dontCacheRedirects = 0;
+int maxSideBuffering = 1500;
 
 static HTTPServerPtr servers = 0;
 
-static int httpServerContinueObjectHandler(int, ObjectHandlerPtr);
+static int httpServerContinueConditionHandler(int, ConditionHandlerPtr);
+static int initParentProxy(void);
+static int parentProxySetter(ConfigVariablePtr var, void *value);
 static void httpServerDelayedFinish(HTTPConnectionPtr);
+static int allowUnalignedRangeRequests = 0;
 
 void
 preinitServer(void)
 {
-    CONFIG_VARIABLE(parentHost, CONFIG_ATOM_LOWER, "Parent proxy hostname.");
-    CONFIG_VARIABLE(parentPort, CONFIG_INT, "Parent proxy port.");
+    CONFIG_VARIABLE_SETTABLE(parentProxy, CONFIG_ATOM_LOWER, parentProxySetter,
+                    "Parent proxy (host:port).");
     CONFIG_VARIABLE(serverExpireTime, CONFIG_TIME,
                     "Time during which server data is valid.");
-    CONFIG_VARIABLE(smallRequestTime, CONFIG_TIME,
-                    "Estimated time for a small request.");
-    CONFIG_VARIABLE(replyUnpipelineTime, CONFIG_TIME,
-                    "Estimated time for a pipeline break.");
-    CONFIG_VARIABLE(replyUnpipelineSize, CONFIG_INT,
+    CONFIG_VARIABLE_SETTABLE(smallRequestTime, CONFIG_TIME, configIntSetter,
+                             "Estimated time for a small request.");
+    CONFIG_VARIABLE_SETTABLE(replyUnpipelineTime, CONFIG_TIME, configIntSetter,
+                             "Estimated time for a pipeline break.");
+    CONFIG_VARIABLE_SETTABLE(replyUnpipelineSize, CONFIG_INT, configIntSetter,
                     "Size for a pipeline break.");
-    CONFIG_VARIABLE(pipelineAdditionalRequests, CONFIG_TRISTATE,
-                    "Pipeline requests on an active connection.");
-    CONFIG_VARIABLE(maxPipelineTrain, CONFIG_INT,
-                    "Maximum number of requests pipelined at a time.");
+    CONFIG_VARIABLE_SETTABLE(pipelineAdditionalRequests, CONFIG_TRISTATE,
+                             configIntSetter,
+                             "Pipeline requests on an active connection.");
+    CONFIG_VARIABLE_SETTABLE(maxPipelineTrain, CONFIG_INT,
+                             configIntSetter,
+                             "Maximum number of requests "
+                             "pipelined at a time.");
     CONFIG_VARIABLE(pmmFirstSize, CONFIG_INT,
                     "The size of the first PMM chunk.");
     CONFIG_VARIABLE(pmmSize, CONFIG_INT,
@@ -64,6 +73,22 @@ preinitServer(void)
                     "Maximum number of connections per server.");
     CONFIG_VARIABLE(serverMaxSlots, CONFIG_INT,
                     "Maximum number of connections per broken server.");
+    CONFIG_VARIABLE(dontCacheRedirects, CONFIG_BOOLEAN,
+                    "If true, don't cache redirects.");
+    CONFIG_VARIABLE_SETTABLE(allowUnalignedRangeRequests,
+                             CONFIG_BOOLEAN, configIntSetter,
+                             "Allow unaligned range requests (unreliable).");
+    CONFIG_VARIABLE_SETTABLE(maxSideBuffering,
+                             CONFIG_INT, configIntSetter,
+                             "Maximum buffering for PUT and POST requests.");
+}
+
+static int
+parentProxySetter(ConfigVariablePtr var, void *value)
+{
+    configAtomSetter(var, value);
+    initParentProxy();
+    return 1;
 }
 
 static void
@@ -121,14 +146,52 @@ expireServersHandler(TimeEventHandlerPtr event)
 static int
 roundSize(int size)
 {
-    if(size < CHUNK_SIZE)
-        return 1 << log2_ceil(pmmSize);
-    else if(size > CHUNK_SIZE)
-        return (size + CHUNK_SIZE - 1) / CHUNK_SIZE * CHUNK_SIZE;
-    else
-        return size;
+    return (size + CHUNK_SIZE - 1) / CHUNK_SIZE * CHUNK_SIZE;
 }
-        
+
+static int
+initParentProxy()
+{
+    AtomPtr host, port_atom;
+    int rc, port;
+
+    if(parentHost) {
+        releaseAtom(parentHost);
+        parentHost = NULL;
+    }
+    if(parentPort >= 0)
+        parentPort = -1;
+
+    if(parentProxy != NULL && parentProxy->length == 0) {
+        releaseAtom(parentProxy);
+        parentProxy = NULL;
+    }
+
+    if(parentProxy == NULL)
+        return 1;
+
+    rc = atomSplit(parentProxy, ':', &host, &port_atom);
+    if(rc <= 0) {
+        do_log(L_ERROR, "Couldn't parse parentProxy.");
+        releaseAtom(parentProxy);
+        parentProxy = NULL;
+        return -1;
+    }
+
+    port = atoi(port_atom->string);
+    if(port <= 0 || port >= 0x10000) {
+        releaseAtom(host);
+        releaseAtom(port_atom);
+        do_log(L_ERROR, "Couldn't parse parentProxy.");
+        releaseAtom(parentProxy);
+        parentProxy = NULL;
+        return -1;
+    }
+
+    parentHost = host;
+    parentPort = port;
+    return 1;
+}
 
 void
 initServer(void)
@@ -149,6 +212,8 @@ initServer(void)
         serverSlots = 1;
     if(serverSlots > serverMaxSlots)
         serverSlots = serverMaxSlots;
+
+    initParentProxy();
 
     event = scheduleTimeEvent(serverExpireTime / 60 + 60, expireServersHandler,
                               0, NULL);
@@ -333,9 +398,13 @@ httpMakeServerRequest(char *name, int port, ObjectPtr object,
     /* Because we allocate objects in chunks, we cannot have data that
        doesn't start at a chunk boundary. */
     if(from % CHUNK_SIZE != 0) {
-        objectFillFromDisk(object, from / CHUNK_SIZE * CHUNK_SIZE, 1);
-        if(objectHoleSize(object, from - 1) != 0)
+        if(allowUnalignedRangeRequests) {
+            objectFillFromDisk(object, from / CHUNK_SIZE * CHUNK_SIZE, 1);
+            if(objectHoleSize(object, from - 1) != 0)
+                from = from / CHUNK_SIZE * CHUNK_SIZE;
+        } else {
             from = from / CHUNK_SIZE * CHUNK_SIZE;
+        }
     }
 
     request->object = retainObject(object);
@@ -344,15 +413,16 @@ httpMakeServerRequest(char *name, int port, ObjectPtr object,
         if(server->lies > 0)
             request->method = METHOD_HEAD;
     }
+    request->flags =
+        REQUEST_PERSISTENT |
+        (expectContinue ? (requestor->flags & REQUEST_WAIT_CONTINUE) : 0);
     request->from = from;
     request->to = to;
-    request->persistent = 1;
     request->request = requestor;
     requestor->request = request;
     request->cache_control = requestor->cache_control;
     request->time0 = null_time;
     request->time1 = null_time;
-    request->wait_continue = expectContinue ? requestor->wait_continue : 0;
 
     rc = httpServerQueueRequest(server, request);
     if(rc < 0) {
@@ -365,7 +435,7 @@ httpMakeServerRequest(char *name, int port, ObjectPtr object,
         return 1;
     }
 
-    if(request->wait_continue) {
+    if(request->flags & REQUEST_WAIT_CONTINUE) {
         if(server->version == HTTP_10) {
             httpServerAbortRequest(request, 1,
                                    417, internAtom("Expectation failed"));
@@ -373,7 +443,7 @@ httpMakeServerRequest(char *name, int port, ObjectPtr object,
         }
     } else if(expectContinue >= 2 && server->version == HTTP_11) {
         if(request->method == METHOD_POST || request->method == METHOD_PUT)
-            request->wait_continue = 1;
+            request->flags |= REQUEST_WAIT_CONTINUE;
     }
         
  again:
@@ -418,11 +488,17 @@ httpServerConnection(HTTPServerPtr server)
 
     do_log(D_SERVER_CONN, "C... %s:%d.\n",
            connection->server->name, connection->server->port);
-    httpSetTimeout(connection, 60);
-    connection->connecting = CONNECTING_DNS;
-    do_gethostbyname(server->name, 0,
-                     httpServerConnectionDnsHandler,
-                     connection);
+    httpSetTimeout(connection, serverTimeout);
+    if(socksParentProxy) {
+        connection->connecting = CONNECTING_SOCKS;
+        do_socks_connect(server->name, connection->server->port,
+                         httpServerSocksHandler, connection);
+    } else {
+        connection->connecting = CONNECTING_DNS;
+        do_gethostbyname(server->name, 0,
+                         httpServerConnectionDnsHandler,
+                         connection);
+    }
     return 1;
 }
 
@@ -467,7 +543,7 @@ httpServerConnectionDnsHandler(int status, GethostbynameRequestPtr request)
             return 1;
         }
             
-        httpSetTimeout(connection, 60);
+        httpSetTimeout(connection, serverTimeout);
         do_gethostbyname(request->addr->string + 1, request->count + 1,
                          httpServerConnectionDnsHandler,
                          connection);
@@ -475,7 +551,7 @@ httpServerConnectionDnsHandler(int status, GethostbynameRequestPtr request)
     }
 
     connection->connecting = CONNECTING_CONNECT;
-    httpSetTimeout(connection, 60);
+    httpSetTimeout(connection, serverTimeout);
     do_connect(retainAtom(request->addr), connection->server->addrindex,
                connection->server->port,
                httpServerConnectionHandler, connection);
@@ -488,13 +564,36 @@ httpServerConnectionHandler(int status,
                             ConnectRequestPtr request)
 {
     HTTPConnectionPtr connection = request->data;
-    int rc;
+
+    assert(connection->fd < 0);
+    if(request->fd >= 0) {
+        int rc;
+        connection->fd = request->fd;
+        connection->server->addrindex = request->index;
+        rc = setNodelay(connection->fd, 1);
+        if(rc < 0)
+            do_log_error(L_WARN, errno, "Couldn't disable Nagle's algorithm");
+    }
+
+    return httpServerConnectionHandlerCommon(status, connection);
+}
+
+int
+httpServerSocksHandler(int status, SocksRequestPtr request)
+{
+    HTTPConnectionPtr connection = request->data;
 
     assert(connection->fd < 0);
     if(request->fd >= 0) {
         connection->fd = request->fd;
-        connection->server->addrindex = request->index;
+        connection->server->addrindex = 0;
     }
+    return httpServerConnectionHandlerCommon(status, connection);
+}
+
+int
+httpServerConnectionHandlerCommon(int status, HTTPConnectionPtr connection)
+{
     httpSetTimeout(connection, -1);
 
     if(status < 0) {
@@ -502,8 +601,9 @@ httpServerConnectionHandler(int status,
             internAtomError(-status, "Connect to %s:%d failed",
                             connection->server->name,
                             connection->server->port);
-        do_log_error(L_ERROR, -status, "Connect to %s:%d failed",
-                     connection->server->name, connection->server->port);
+        if(status != -ECLIENTRESET)
+            do_log_error(L_ERROR, -status, "Connect to %s:%d failed",
+                         connection->server->name, connection->server->port);
         connection->connecting = 0;
         if(connection->server->request)
             httpServerAbortRequest(connection->server->request,
@@ -516,11 +616,8 @@ httpServerConnectionHandler(int status,
     do_log(D_SERVER_CONN, "C    %s:%d.\n",
            connection->server->name, connection->server->port);
 
-    rc = setNodelay(connection->fd, 1);
-    if(rc < 0)
-        do_log_error(L_WARN, errno, "Couldn't disable Nagle's algorithm");
-
     connection->connecting = 0;
+    /* serverTrigger will take care of inserting any timeouts */
     httpServerTrigger(connection->server);
     return 1;
 }
@@ -579,7 +676,7 @@ pipelineIsSmall(HTTPConnectionPtr connection)
 
     if(!request)
         return 1;
-    if(request->next || !request->persistent)
+    if(request->next || !(request->flags & REQUEST_PERSISTENT))
         return 0;
     if(request->method == METHOD_HEAD || 
        request->method == METHOD_CONDITIONAL_GET)
@@ -604,11 +701,12 @@ numRequests(HTTPServerPtr server)
 }
 
 HTTPConnectionPtr
-httpServerGetConnection(HTTPServerPtr server)
+httpServerGetConnection(HTTPServerPtr server, int *idle_return)
 {
-    int i;
-    int connecting = 0, empty = 0;
+    int i, j;
+    int connecting = 0, empty = 0, idle = 0;
 
+    j = -1;
     /* Try to find an idle connection */
     for(i = 0; i < server->numslots; i++) {
         if(server->connection[i]) {
@@ -617,12 +715,18 @@ httpServerGetConnection(HTTPServerPtr server)
                     if(server->idleHandler[i])
                         unregisterFdEvent(server->idleHandler[i]);
                     server->idleHandler[i] = NULL;
-                    return server->connection[i];
+                    if(j < 0) j = i;
+                    idle++;
                 }
             } else
                 connecting++;
         } else
             empty++;
+    }
+
+    if(j >= 0) {
+        *idle_return = idle;
+        return server->connection[j];
     }
 
     /* If there's an empty slot, schedule connection creation */
@@ -644,10 +748,12 @@ httpServerGetConnection(HTTPServerPtr server)
                 if(server->idleHandler[i])
                     unregisterFdEvent(server->idleHandler[i]);
                 server->idleHandler[i] = NULL;
+                *idle_return = 0;
                 return server->connection[i];
             }
         }
     }
+    *idle_return = idle;
     return NULL;
 }
 
@@ -656,7 +762,7 @@ httpServerTrigger(HTTPServerPtr server)
 {
     HTTPConnectionPtr connection;
     HTTPRequestPtr request;
-    int idle, n, i, rc;
+    int idle, n, i, rc, numidle;
 
     while(server->request) {
         httpServerDiscardRequests(server);
@@ -672,7 +778,7 @@ httpServerTrigger(HTTPServerPtr server)
             if(rc <= 0) break;
             continue;
         }
-        connection = httpServerGetConnection(server);
+        connection = httpServerGetConnection(server, &numidle);
         if(!connection) break;
 
         /* If server->pipeline <= 0, we don't do pipelining.  If
@@ -699,6 +805,10 @@ httpServerTrigger(HTTPServerPtr server)
         } else {
             n = maxPipelineTrain;
         }
+
+        /* Don't pipeline if there are more idle connections */
+        if(numidle >= 2)
+            n = MIN(n, 1);
     
         idle = !connection->pipelined;
         i = 0;
@@ -719,8 +829,9 @@ httpServerTrigger(HTTPServerPtr server)
             do_log_n(D_SERVER_CONN, 
                      request->object->key, request->object->key_size);
             do_log(D_SERVER_CONN, " (%d)\n", request->method);
-            if(connection->pipelined == 0)
-                request->time0 = current_time;
+            if(connection->pipelined > 0)
+                request->flags |= REQUEST_PIPELINED;
+            request->time0 = current_time;
             i++;
             server->request = request->next;
             request->next = NULL;
@@ -848,7 +959,7 @@ httpServerDoSide(HTTPConnectionPtr connection)
                   connection->bodylen - connection->reqoffset);
     int doflush = 
         len > 0 &&
-        (len >= 1500 ||
+        (len >= maxSideBuffering ||
          client->reqbegin > 0 ||
          (connection->reqoffset + client->reqlen - client->reqbegin) >=
          connection->bodylen);
@@ -865,7 +976,7 @@ httpServerDoSide(HTTPConnectionPtr connection)
                     connection->fd, 0,
                     connection->reqbuf, connection->reqlen,
                     client->reqbuf + client->reqbegin, 
-                    request->wait_continue ? 0 : len,
+                    (request->flags & REQUEST_WAIT_CONTINUE) ? 0 : len,
                     httpServerSideHandler2, connection);
         httpServerReply(connection, 0);
     } else if(request->object->flags & OBJECT_ABORTED) {
@@ -878,7 +989,7 @@ httpServerDoSide(HTTPConnectionPtr connection)
         do_stream(IO_READ | IO_IMMEDIATE,
                   client->fd, 0, NULL, 0,
                   httpClientSideHandler, client);
-    } else if(!request->wait_continue && doflush) {
+    } else if(!(request->flags & REQUEST_WAIT_CONTINUE) && doflush) {
         /* Make sure there's a reqbuf, as httpServerFinish uses
            it to determine if there's a writer. */
         if(connection->reqbuf == NULL)
@@ -889,22 +1000,22 @@ httpServerDoSide(HTTPConnectionPtr connection)
                   client->reqbuf + client->reqbegin, len,
                   httpServerSideHandler, connection);
     } else {
-        if(connection->reqbuf)
-            dispose_chunk(connection->reqbuf);
-        connection->reqbuf = NULL;
-        connection->reqlen = 0;
-        if(request->wait_continue) {
-            ObjectHandlerPtr ohandler;
+        if(connection->reqbuf) {
+            httpConnectionDestroyReqbuf(connection);
+            connection->reqlen = 0;
+        }
+        if(request->flags & REQUEST_WAIT_CONTINUE) {
+            ConditionHandlerPtr chandler;
             do_log(D_SERVER_CONN, "W... %s:%d.\n",
                    connection->server->name, connection->server->port);
-            ohandler = 
-                registerObjectHandler(request->object,
-                                      httpServerContinueObjectHandler,
-                                      sizeof(connection), &connection);
-            if(ohandler)
+            chandler = 
+                conditionWait(&request->object->condition,
+                              httpServerContinueConditionHandler,
+                              sizeof(connection), &connection);
+            if(chandler)
                 return 1;
             else
-                do_log(L_ERROR, "Couldn't register object handler.\n");
+                do_log(L_ERROR, "Couldn't register condition handler.\n");
             /* Fall through -- the client side will clean up. */
         }
         client->flags |= CONN_SIDE_READER;
@@ -957,8 +1068,7 @@ httpServerSideHandlerCommon(int kind, int status,
 
     if(status) {
         do_log_error(L_ERROR, -status, "Couldn't write to server");
-        dispose_chunk(connection->reqbuf);
-        connection->reqbuf = NULL;
+        httpConnectionDestroyReqbuf(connection);
         if(status != -ECLIENTRESET)
             shutdown(connection->fd, 2);
         abortObject(request->object, 503,
@@ -974,9 +1084,8 @@ httpServerSideHandlerCommon(int kind, int status,
         if(srequest->offset < connection->reqlen)
             return 0;
         bodylen = srequest->offset - connection->reqlen;
-        dispose_chunk(connection->reqbuf);
-        connection->reqbuf = NULL;
         connection->reqlen = 0;
+        httpConnectionDestroyReqbuf(connection);
     } else {
         bodylen = srequest->offset;
     }
@@ -1011,13 +1120,11 @@ httpServerSideHandler2(int status,
 }
 
 static int
-httpServerContinueObjectHandler(int status, ObjectHandlerPtr ohandler)
+httpServerContinueConditionHandler(int status, ConditionHandlerPtr chandler)
 {
-    ObjectPtr object = ohandler->object;
-    HTTPConnectionPtr connection = *(HTTPConnectionPtr*)ohandler->data;
+    HTTPConnectionPtr connection = *(HTTPConnectionPtr*)chandler->data;
 
-    assert(object == connection->request->object);
-    if(connection->request->wait_continue)
+    if(connection->request->flags & REQUEST_WAIT_CONTINUE)
         return 0;
     httpServerDelayedDoSide(connection);
     return 1;
@@ -1039,7 +1146,8 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
         assert(connection->pipelined == 0);
     }
 
-    if(s == 0 && (!connection->request || !connection->request->persistent))
+    if(s == 0 && (!connection->request ||
+                  !(connection->request->flags & REQUEST_PERSISTENT)))
         s = 1;
 
     if(connection->reqbuf) {
@@ -1059,23 +1167,25 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
         int size = -1, d = -1, rtt = -1, rate = -1;
         if(connection->offset > 0 && request->from >= 0)
             size = connection->offset - request->from;
-        if(request->time0.tv_sec > 0 && request->time1.tv_sec > 0) {
+        if(request->time1.tv_sec != null_time.tv_sec) {
             d = timeval_minus_usec(&current_time, &request->time1);
-            rtt = timeval_minus_usec(&request->time1, &request->time0);
-            if(size >= 4096 && d > 50000)
+            if(!(request->flags & REQUEST_PIPELINED) &&
+               request->time0.tv_sec != null_time.tv_sec)
+                rtt = timeval_minus_usec(&request->time1, &request->time0);
+            if(size >= 8192 && d > 50000)
                 rate = ((double)size / (double)d) * 1000000.0 + 0.5;
         }
         request->time0 = null_time;
         request->time1 = null_time;
 
-        if(rtt > 0) {
-            if(server->rtt > 0)
+        if(rtt >= 0) {
+            if(server->rtt >= 0)
                 server->rtt = (3 * server->rtt + rtt + 2) / 4;
             else
                 server->rtt = rtt;
         }
-        if(rate > 0) {
-            if(server->rate > 0)
+        if(rate >= 0) {
+            if(server->rate >= 0)
                 server->rate = (3 * server->rate + rate + 2) / 4;
             else
                 server->rate = rate;
@@ -1111,6 +1221,9 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
                 memmove(connection->buf, connection->buf + offset,
                         connection->len - offset);
                 connection->len = connection->len - offset;
+                if((connection->flags & CONN_BIGBUF) &&
+                   connection->len <= CHUNK_SIZE)
+                    httpConnectionUnbigify(connection);
             }
         } else {
             connection->len = 0;
@@ -1124,10 +1237,7 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
         if(connection->timeout)
             cancelTimeEvent(connection->timeout);
         connection->timeout = NULL;
-        if(connection->buf) {
-            dispose_chunk(connection->buf);
-            connection->buf = NULL;
-        }
+        httpConnectionDestroyBuf(connection);
         if(connection->fd >= 0)
             close(connection->fd);
         connection->fd = -1;
@@ -1172,7 +1282,7 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
         server->persistent += 1;
         if(server->persistent > 0)
             server->numslots = MIN(server->maxslots, serverSlots);
-        httpSetTimeout(connection, 60);
+        httpSetTimeout(connection, serverTimeout);
         /* See httpServerTrigger */
         if(connection->pipelined ||
            (server->version == HTTP_11 && server->pipeline <= 0) ||
@@ -1182,10 +1292,7 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
         if(s < 0 || connection->pipelined) {
             httpServerReply(connection, 1);
         } else {
-            if(connection->buf) {
-                dispose_chunk(connection->buf);
-                connection->buf = NULL;
-            }
+            httpConnectionDestroyBuf(connection);
         }
     }
 
@@ -1239,14 +1346,10 @@ httpServerReply(HTTPConnectionPtr connection, int immediate)
              connection->request->object->key_size);
     do_log(D_SERVER_CONN, " (%d)\n", connection->request->method);
 
-    if(connection->len == 0) {
-        if(connection->buf) {
-            dispose_chunk(connection->buf);
-            connection->buf = NULL;
-        }
-    }
+    if(connection->len == 0)
+        httpConnectionDestroyBuf(connection);
 
-    httpSetTimeout(connection, 60);
+    httpSetTimeout(connection, serverTimeout);
     do_stream_buf(IO_READ | (immediate ? IO_IMMEDIATE : 0) | IO_NOTNOW,
                   connection->fd, connection->len,
                   &connection->buf, CHUNK_SIZE,
@@ -1271,7 +1374,7 @@ httpServerUnpipeline(HTTPRequestPtr request)
     HTTPConnectionPtr connection = request->connection;
     HTTPServerPtr server = connection->server;
 
-    request->persistent = 0;
+    request->flags &= ~REQUEST_PERSISTENT;
     if(request->next) {
         HTTPRequestPtr req;
         do_log(L_WARN,
@@ -1339,30 +1442,13 @@ httpServerRequest(ObjectPtr object, int method, int from, int to,
     if(object->flags & OBJECT_INPROGRESS)
         return 1;
 
-    assert(requestor->request == NULL);
-
-    if(requestor->requested)
+    if(requestor->flags & REQUEST_REQUESTED)
         return 0;
+
+    assert(requestor->request == NULL);
 
     if(proxyOffline)
         return -1;
-
-    if(urlForbidden(object->key, object->key_size)) {
-        do_log(L_FORBIDDEN, "Forbidden URL ");
-        do_log_n(L_FORBIDDEN, object->key, object->key_size);
-        do_log(L_FORBIDDEN, "\n");
-        abortObject(object, 403, internAtom("Forbidden URL"));
-        notifyObject(object);
-        if(REQUEST_SIDE(requestor)) {
-            HTTPConnectionPtr client = requestor->connection;
-            client->flags |= CONN_SIDE_READER;
-            do_stream(IO_READ | IO_IMMEDIATE | IO_NOTNOW,
-                      client->fd, client->reqlen,
-                      client->reqbuf, CHUNK_SIZE,
-                      httpClientSideHandler, client);
-        }
-        return 1;
-    }
 
     rc = parseUrl(object->key, object->key_size, &x, &y, &port, &z);
     
@@ -1385,7 +1471,7 @@ httpServerRequest(ObjectPtr object, int method, int from, int to,
     memcpy(name, ((char*)object->key) + x, y - x);
     name[y - x] = '\0';
 
-    requestor->requested = 1;
+    requestor->flags |= REQUEST_REQUESTED;
     rc = httpMakeServerRequest(name, port, object, method, from, to,
                                requestor);
                                    
@@ -1409,8 +1495,7 @@ httpWriteRequest(HTTPConnectionPtr connection, HTTPRequestPtr request,
     int url_size = object->key_size;
     int x, y, port, z, location_size;
     char *location;
-    int rc;
-    int l, n;
+    int l, n, rc, bufsize;
 
     assert(method != METHOD_NONE);
 
@@ -1465,6 +1550,9 @@ httpWriteRequest(HTTPConnectionPtr connection, HTTPRequestPtr request,
        object->last_modified < 0 && object->etag == NULL)
         method = request->method = METHOD_GET;
 
+ again:
+    bufsize = 
+        (connection->flags & CONN_BIGREQBUF) ? bigBufferSize : CHUNK_SIZE;
     n = connection->reqlen;
     switch(method) {
     case METHOD_GET:
@@ -1474,10 +1562,10 @@ httpWriteRequest(HTTPConnectionPtr connection, HTTPRequestPtr request,
     case METHOD_PUT: m = "PUT"; break;
     default: abort();
     }
-    n = snnprintf(connection->reqbuf, n, CHUNK_SIZE, "%s ", m);
+    n = snnprintf(connection->reqbuf, n, bufsize, "%s ", m);
 
     if(connection->server->isProxy) {
-        n = snnprint_n(connection->reqbuf, n, CHUNK_SIZE,
+        n = snnprint_n(connection->reqbuf, n, bufsize,
                        url, url_size);
     } else {
         if(url_size - z == 0) {
@@ -1488,7 +1576,7 @@ httpWriteRequest(HTTPConnectionPtr connection, HTTPRequestPtr request,
             location_size = url_size - z;
         }
         
-        n = snnprint_n(connection->reqbuf, n, CHUNK_SIZE, 
+        n = snnprint_n(connection->reqbuf, n, bufsize, 
                        location, location_size);
     }
     
@@ -1500,34 +1588,32 @@ httpWriteRequest(HTTPConnectionPtr connection, HTTPRequestPtr request,
            method, from, to,
            (unsigned long)connection, (unsigned long)object);
 
-    n = snnprintf(connection->reqbuf, n, CHUNK_SIZE, " HTTP/1.1");
+    n = snnprintf(connection->reqbuf, n, bufsize, " HTTP/1.1");
 
-    n = snnprintf(connection->reqbuf, n, CHUNK_SIZE, "\r\nHost: ");
-    n = snnprint_n(connection->reqbuf, n, CHUNK_SIZE, url + x, y - x);
-    if(port != 80) {
-        n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
-                      ":%d", port);
-    }
+    n = snnprintf(connection->reqbuf, n, bufsize, "\r\nHost: ");
+    n = snnprint_n(connection->reqbuf, n, bufsize, url + x, y - x);
+    if(port != 80)
+        n = snnprintf(connection->reqbuf, n, bufsize, ":%d", port);
 
     if(connection->server->isProxy && parentAuthCredentials) {
-        n = buildServerAuthHeaders(connection->reqbuf, n, CHUNK_SIZE,
+        n = buildServerAuthHeaders(connection->reqbuf, n, bufsize,
                                    parentAuthCredentials);
     }
 
     if(bodylen >= 0)
-        n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
+        n = snnprintf(connection->reqbuf, n, bufsize,
                       "\r\nContent-Length: %d", bodylen);
 
-    if(request->wait_continue)
-        n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
+    if(request->flags & REQUEST_WAIT_CONTINUE)
+        n = snnprintf(connection->reqbuf, n, bufsize,
                       "\r\nExpect: 100-continue");
 
     if(method != METHOD_HEAD && (from > 0 || to >= 0)) {
         if(to >= 0) {
-            n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
+            n = snnprintf(connection->reqbuf, n, bufsize,
                           "\r\nRange: bytes=%d-%d", from, to - 1);
         } else {
-            n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
+            n = snnprintf(connection->reqbuf, n, bufsize,
                           "\r\nRange: bytes=%d-", from);
         }
     }
@@ -1536,50 +1622,61 @@ httpWriteRequest(HTTPConnectionPtr connection, HTTPRequestPtr request,
         if(request->request && request->request->request == request &&
            request->request->from == 0 && request->request->to == -1 &&
            pmmSize == 0 && pmmFirstSize == 0)
-            n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
+            n = snnprintf(connection->reqbuf, n, bufsize,
                           "\r\nIf-Range: \"%s\"", object->etag);
     }
 
     if(method == METHOD_CONDITIONAL_GET) {
         if(object->last_modified >= 0) {
-            n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
+            n = snnprintf(connection->reqbuf, n, bufsize,
                           "\r\nIf-Modified-Since: ");
-            n = format_time(connection->reqbuf, n, CHUNK_SIZE,
+            n = format_time(connection->reqbuf, n, bufsize,
                             object->last_modified);
         }
         if(object->etag) {
-            n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
+            n = snnprintf(connection->reqbuf, n, bufsize,
                           "\r\nIf-None-Match: \"%s\"", object->etag);
         }
     }
 
-    n = httpPrintCacheControl(connection->reqbuf, n, CHUNK_SIZE,
+    n = httpPrintCacheControl(connection->reqbuf, n, bufsize,
                               0, &request->cache_control);
     if(n < 0)
-        return -1;
+        goto fail;
 
     if(request->request && request->request->headers) {
-        n = snnprint_n(connection->reqbuf, n, CHUNK_SIZE,
+        n = snnprint_n(connection->reqbuf, n, bufsize,
                        request->request->headers->string, 
                        request->request->headers->length);
     }
-    if(request->request && request->request->via) {
-        n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
-                      "\r\nVia: %s, 1.1 %s",
-                      request->request->via->string, proxyName->string);
-    } else {
-        n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
-                      "\r\nVia: 1.1 %s",
-                      proxyName->string);
+    if(!disableVia) {
+        if(request->request && request->request->via) {
+            n = snnprintf(connection->reqbuf, n, bufsize,
+                          "\r\nVia: %s, 1.1 %s",
+                          request->request->via->string, proxyName->string);
+        } else {
+            n = snnprintf(connection->reqbuf, n, bufsize,
+                          "\r\nVia: 1.1 %s",
+                          proxyName->string);
+        }
     }
 
-    n = snnprintf(connection->reqbuf, n, CHUNK_SIZE,
+    n = snnprintf(connection->reqbuf, n, bufsize,
                   "\r\nConnection: %s\r\n\r\n",
-                  request->persistent?"keep-alive":"close");
-    if(n < 0 || n >= CHUNK_SIZE - 1)
-        return -1;
+                  (request->flags & REQUEST_PERSISTENT) ? 
+                  "keep-alive" : "close");
+    if(n < 0 || n >= bufsize - 1)
+        goto fail;
     connection->reqlen = n;
     return n;
+
+ fail:
+    rc = 0;
+    if(!(connection->flags & CONN_BIGREQBUF))
+        rc = httpConnectionBigifyReqbuf(connection);
+    if(rc == 1)
+        goto again;
+    return -1;
 }
 
 int
@@ -1599,12 +1696,11 @@ httpServerHandler(int status,
     }
 
     if(status == 0 && !streamRequestDone(srequest)) {
-        httpSetTimeout(connection, 60);
+        httpSetTimeout(connection, serverTimeout);
         return 0;
     }
     
-    dispose_chunk(connection->reqbuf);
-    connection->reqbuf = NULL;
+    httpConnectionDestroyReqbuf(connection);
 
     if(status) {
         if(connection->serviced >= 1) {
@@ -1643,14 +1739,13 @@ httpServerSendRequest(HTTPConnectionPtr connection)
     if(connection->reqlen == 0) {
         do_log(D_SERVER_REQ, 
                "Writing aborted on 0x%lx\n", (unsigned long)connection);
-        dispose_chunk(connection->reqbuf);
-        connection->reqbuf = NULL;
+        httpConnectionDestroyReqbuf(connection);
         shutdown(connection->fd, 2);
         pokeFdEvent(connection->fd, -EDOSHUTDOWN, POLLIN | POLLOUT);
         return -1;
     }
 
-    httpSetTimeout(connection, 60);
+    httpSetTimeout(connection, serverTimeout);
     do_stream(IO_WRITE, connection->fd, 0,
               connection->reqbuf, connection->reqlen,
               httpServerHandler, connection);
@@ -1665,6 +1760,8 @@ httpServerReplyHandler(int status,
     HTTPConnectionPtr connection = srequest->data;
     HTTPRequestPtr request = connection->request;
     int i, body;
+    int bufsize = 
+        (connection->flags & CONN_BIGBUF) ? bigBufferSize : CHUNK_SIZE;
 
     assert(request->object->flags & OBJECT_INPROGRESS);
     if(status < 0) {
@@ -1687,13 +1784,6 @@ httpServerReplyHandler(int status,
         return httpServerHandlerHeaders(status, event, srequest, connection);
     }
 
-    if(connection->len >= CHUNK_SIZE) {
-        do_log(L_ERROR, "Couldn't find end of server's headers\n");
-        httpServerAbort(connection, 1, 502,
-                        internAtom("Couldn't find end of server's headers"));
-        return 1;
-    }
-
     if(status) {
         if(connection->serviced >= 1) {
             httpServerRestart(connection);
@@ -1708,6 +1798,30 @@ httpServerReplyHandler(int status,
         } else
             httpServerAbort(connection, 1, 502, 
                             internAtom("Server dropped connection"));
+        return 1;
+    }
+
+    if(connection->len >= bufsize) {
+        int rc = 0;
+        if(!(connection->flags & CONN_BIGBUF))
+            rc = httpConnectionBigify(connection);
+        if(rc == 0) {
+            do_log(L_ERROR, "Couldn't find end of server's headers.\n");
+            httpServerAbort(connection, 1, 502,
+                            internAtom("Couldn't find end "
+                                       "of server's headers"));
+            return 1;
+        } else if(rc < 0) {
+            do_log(L_ERROR, "Couldn't allocate big buffer.\n");
+            httpServerAbort(connection, 1, 500,
+                            internAtom("Couldn't allocate big buffer"));
+            return 1;
+        }
+        /* Can't just return 0 -- buf has moved. */
+        do_stream(IO_READ,
+                  connection->fd, connection->len,
+                  connection->buf, bigBufferSize,
+                  httpServerReplyHandler, connection);
         return 1;
     }
 
@@ -1747,10 +1861,10 @@ httpServerHandlerHeaders(int eof,
 
     httpSetTimeout(connection, -1);
 
-    if(request->wait_continue) {
+    if(request->flags & REQUEST_WAIT_CONTINUE) {
         do_log(D_SERVER_CONN, "W   %s:%d.\n",
                connection->server->name, connection->server->port);
-        request->wait_continue = 0;
+        request->flags &= ~REQUEST_WAIT_CONTINUE;
     }
 
     rc = httpParseServerFirstLine(connection->buf, &code, &version, &message);
@@ -1777,7 +1891,7 @@ httpServerHandlerHeaders(int eof,
 
     connection->version = version;
     connection->server->version = version;
-    request->persistent = 1;
+    request->flags |= REQUEST_PERSISTENT;
 
     url = internAtomN(object->key, object->key_size);    
     rc = httpParseHeaders(0, url, connection->buf, rc, request,
@@ -1832,10 +1946,11 @@ httpServerHandlerHeaders(int eof,
     } else if(code < 400 && 
               (content_range.from >= 0 || content_range.to >= 0 || 
                content_range.full_length >= 0)) {
-        do_log(L_ERROR, "Range without partial content.\n");
-        httpServerAbort(connection, 1, 502,
-                        internAtom("Range without partial content"));
-        goto fail;
+        do_log(L_WARN, "Range without partial content.\n");
+        /* Damn anakata. */
+        content_range.from = -1;
+        content_range.to = -1;
+        content_range.full_length = -1;
     } else if(code != 304 && code != 412) {
         full_len = len;
     }
@@ -1862,7 +1977,8 @@ httpServerHandlerHeaders(int eof,
     }
 
     if(code == 412) {
-        if(request->method != METHOD_CONDITIONAL_GET) {
+        if(request->method != METHOD_CONDITIONAL_GET ||
+           (!object->etag && !object->last_modified)) {
             do_log(L_ERROR, 
                    "Unexpected \"precondition failed\" reply from server.\n");
             httpServerAbort(connection, 1, 502,
@@ -1870,7 +1986,6 @@ httpServerHandlerHeaders(int eof,
                                        "reply from server"));
             goto fail;
         }
-        assert(object->etag || object->last_modified);
     }
 
     releaseAtom(url);
@@ -1908,6 +2023,9 @@ httpServerHandlerHeaders(int eof,
 
     connection->server->lies--;
 
+    if(object->cache_control & CACHE_MISMATCH)
+        supersede = 1;
+
     if(code == 304 || code == 412) {
         if((object->etag && etag && strcmp(object->etag, etag) != 0) ||
            (object->last_modified >= 0 && last_modified >= 0 &&
@@ -1932,6 +2050,20 @@ httpServerHandlerHeaders(int eof,
             if(etag && object->etag && strcmp(object->etag, etag) != 0)
                 supersede = 1;
             else if(!object->etag)
+                supersede = 1;
+        }
+
+        if(!supersede && (object->cache_control & CACHE_VARY) &&
+           dontTrustVaryETag >= 1) {
+            /* Check content-type to work around mod_gzip bugs */
+            if(!httpHeaderMatch(atomContentType, object->headers, headers) ||
+               !httpHeaderMatch(atomContentEncoding, object->headers, headers))
+                supersede = 1;
+        }
+
+        if(full_len < 0 && te == TE_IDENTITY) {
+            /* It's an HTTP/1.0 CGI.  Be afraid. */
+            if(expect_body && content_range.from < 0 && content_range.to < 0)
                 supersede = 1;
         }
 
@@ -2048,27 +2180,7 @@ httpServerHandlerHeaders(int eof,
         break;
     }
 
-    if((cache_control.flags & CACHE_AUTHORIZATION) &&
-       !(cache_control.flags & CACHE_PUBLIC))
-        new_object->cache_control |= (CACHE_NO_HIDDEN | OBJECT_LINEAR);
-
-    /* This is not required by RFC 2616 -- but see RFC 3143 2.1.1.  We
-       manically avoid caching replies that we don't know how to
-       handle, even if Expires or Cache-Control says otherwise.  As to
-       known uncacheable replies, we obey Cache-Control and default to
-       allowing sharing but not caching. */
-    if(code != 200 && code != 206 && 
-       code != 300 && code != 301 && code != 302 && code != 303 &&
-       code != 304 && code != 307 &&
-       code != 403 && code != 404 && code != 405 && code != 416) {
-        new_object->cache_control |= (CACHE_NO_HIDDEN | OBJECT_LINEAR);
-    } else if(code != 200 && code != 206 &&
-              code != 300 && code != 301 && code != 304 &&
-              code != 410) {
-        if(new_object->expires < 0 && !(cache_control.flags & CACHE_PUBLIC)) {
-            new_object->cache_control |= CACHE_NO_HIDDEN;
-        }
-    }
+    httpTweakCachability(new_object);
 
     if(!via)
         new_via = internAtomF("%s %s",
@@ -2084,10 +2196,6 @@ httpServerHandlerHeaders(int eof,
         if(new_object->via) releaseAtom(new_object->via);
         new_object->via = new_via;
     }
-
-    if((new_object->cache_control & CACHE_NO_STORE) ||
-       ((new_object->cache_control & CACHE_VARY) && !new_object->etag))
-        new_object->cache_control |= CACHE_NO_HIDDEN;
 
     if(new_object->flags & OBJECT_INITIAL) {
         objectPartial(new_object, full_len, headers);
@@ -2160,14 +2268,14 @@ httpServerHandlerHeaders(int eof,
     }
 
 
-    if(request->persistent) {
+    if(request->flags & REQUEST_PERSISTENT) {
         if(request->method != METHOD_HEAD && 
            connection->te == TE_IDENTITY && len < 0) {
             do_log(L_ERROR, "Persistent reply with no Content-Length\n");
             /* That's potentially dangerous, as we could start reading
                arbitrary data into the object.  Unfortunately, some
                servers do that. */
-            request->persistent = 0;
+            request->flags &= ~REQUEST_PERSISTENT;
         }
     }
 
@@ -2229,7 +2337,7 @@ httpServerHandlerHeaders(int eof,
                             internAtom("Server closed connection"));
             return 1;
         } else {
-            if(code != 206 && eof != -ECLIENTRESET && object->length < 0) {
+            if(code != 206 && eof > 0 && object->length < 0) {
                 object->length = object->size;
                 objectMetadataChanged(object, 0);
             }
@@ -2305,7 +2413,7 @@ httpServerIndirectHandlerCommon(HTTPConnectionPtr connection, int eof)
                             internAtom("Server dropped connection"));
             return 1;
         } else {
-            if(request->object->length < 0 && eof != -ECLIENTRESET &&
+            if(request->object->length < 0 && eof > 0 &&
                (request->to < 0 || request->to > request->object->size)) {
                 request->object->length = request->object->size;
                 objectMetadataChanged(request->object, 0);
@@ -2390,10 +2498,7 @@ httpServerReadData(HTTPConnectionPtr connection, int immediate)
         }
         end = len + connection->offset;
 
-        if(connection->buf) {
-            dispose_chunk(connection->buf);
-            connection->buf = NULL;
-        }
+        httpConnectionDestroyBuf(connection);
 
         /* The order of allocation is important in case we run out of
            memory. */
@@ -2438,14 +2543,10 @@ httpServerReadData(HTTPConnectionPtr connection, int immediate)
         }
     }
        
-    if(connection->len == 0) {
-        if(connection->buf) {
-            dispose_chunk(connection->buf);
-            connection->buf = NULL;
-        }
-    }
+    if(connection->len == 0)
+        httpConnectionDestroyBuf(connection);
 
-    httpSetTimeout(connection, 60);
+    httpSetTimeout(connection, serverTimeout);
     do_stream_buf(IO_READ | IO_NOTNOW |
                   ((immediate && connection->len) ? IO_IMMEDIATE : 0),
                   connection->fd, connection->len,
@@ -2655,63 +2756,64 @@ connectionAddData(HTTPConnectionPtr connection, int skip)
 }
 
 void
-listServers()
+listServers(FILE *out)
 {
     HTTPServerPtr server;
-    int i, n, m;
+    int i, n, m, entry;
 
-    printf("<!DOCTYPE HTML PUBLIC "
-           "\"-//W3C//DTD HTML 4.01 Transitional//EN\" "
-           "\"http://www.w3.org/TR/html4/loose.dtd\">\n"
-           "<html><head>\n"
-           "\r\n<title>Known servers</title>\n"
+    fprintf(out, "<!DOCTYPE HTML PUBLIC "
+            "\"-//W3C//DTD HTML 4.01 Transitional//EN\" "
+            "\"http://www.w3.org/TR/html4/loose.dtd\">\n"
+            "<html><head>\n"
+            "\r\n<title>Known servers</title>\n"
            "</head><body>\n"
-           "<h1>Known servers</h1>\n");
+            "<h1>Known servers</h1>\n");
 
-    printf("<table>\n");
-    printf("<thead><tr><th>Server</th>"
-           "<th>Version</th>"
-           "<th>Persistent</th>"
-           "<th>Pipeline</th>"
-           "<th>Connections</th>"
-           "<th></th>"
-           "<th>rtt</th>"
-           "<th>rate</th>"
-           "</tr></thead>\n");
-    printf("<tbody>\n");
+    alternatingHttpStyle(out, "servers");
+    fprintf(out, "<table id=servers>\n");
+    fprintf(out, "<thead><tr><th>Server</th>"
+            "<th>Version</th>"
+            "<th>Persistent</th>"
+            "<th>Pipeline</th>"
+            "<th>Connections</th>"
+            "<th></th>"
+            "<th>rtt</th>"
+            "<th>rate</th>"
+            "</tr></thead>\n");
+    fprintf(out, "<tbody>\n");
     server = servers;
+    entry = 0;
     while(server) {
-        printf("<tr>");
-
+        fprintf(out, "<tr class=\"%s\">", entry % 2 == 0 ? "even" : "odd");
         if(server->port == 80)
-            printf("<td>%s</td>", server->name);
+            fprintf(out, "<td>%s</td>", server->name);
         else
-            printf("<td>%s:%d</td>", server->name, server->port);
+            fprintf(out, "<td>%s:%d</td>", server->name, server->port);
 
         if(server->version == HTTP_11)
-            printf("<td>1.1</td>");
+            fprintf(out, "<td>1.1</td>");
         else if(server->version == HTTP_10)
-            printf("<td>1.0</td>");
+            fprintf(out, "<td>1.0</td>");
         else
-            printf("<td>unknown</td>");
+            fprintf(out, "<td>unknown</td>");
 
         if(server->persistent < 0)
-            printf("<td>no</td>");
+            fprintf(out, "<td>no</td>");
         else if(server->persistent > 0)
-            printf("<td>yes</td>");
+            fprintf(out, "<td>yes</td>");
         else
-            printf("<td>unknown</td>");
+            fprintf(out, "<td>unknown</td>");
 
         if(server->version != HTTP_11 || server->persistent <= 0)
-            printf("<td></td>");
+            fprintf(out, "<td></td>");
         else if(server->pipeline < 0)
-            printf("<td>no</td>");
+            fprintf(out, "<td>no</td>");
         else if(server->pipeline >= 0 && server->pipeline <= 1)
-            printf("<td>unknown</td>");
+            fprintf(out, "<td>unknown</td>");
         else if(server->pipeline == 2 || server->pipeline == 3)
-            printf("<td>probing</td>");
+            fprintf(out, "<td>probing</td>");
         else 
-            printf("<td>yes</td>");
+            fprintf(out, "<td>yes</td>");
 
         n = 0; m = 0;
         for(i = 0; i < server->maxslots; i++)
@@ -2722,34 +2824,32 @@ listServers()
                     m++;
             }
             
-        printf("<td>%d/%d", n, server->numslots);
+        fprintf(out, "<td>%d/%d", n, server->numslots);
         if(m)
-            printf(" + %d</td>", m);
+            fprintf(out, " + %d</td>", m);
         else
-            printf("</td>");
+            fprintf(out, "</td>");
 
         if(server->lies > 0)
-            printf("<td>(%d lies)</td>", (server->lies + 9) / 10);
+            fprintf(out, "<td>(%d lies)</td>", (server->lies + 9) / 10);
         else
-            printf("<td></td>");
+            fprintf(out, "<td></td>");
 
         if(server->rtt > 0)
-            printf("<td>%.3f</td>", (double)server->rtt / 1000000.0);
+            fprintf(out, "<td>%.3f</td>", (double)server->rtt / 1000000.0);
         else
-            printf("<td></td>");
+            fprintf(out, "<td></td>");
         if(server->rate > 0)
-            printf("<td>%d</td>", server->rate);
+            fprintf(out, "<td>%d</td>", server->rate);
         else
-            printf("<td></td>");
-        
-        printf("</tr>\n");
-        if(feof(stdout))
-            exit(1);
+            fprintf(out, "<td></td>");
+
+        fprintf(out, "</tr>\n");
         server = server->next;
+        entry++;
     }
-    printf("</tbody>\n");
-    printf("</table>\n");
-    printf("<p><a href=\"/polipo/\">back</a></p>");
-    printf("</body></html>\n");
-    exit(0);
+    fprintf(out, "</tbody>\n");
+    fprintf(out, "</table>\n");
+    fprintf(out, "<p><a href=\"/polipo/\">back</a></p>");
+    fprintf(out, "</body></html>\n");
 }

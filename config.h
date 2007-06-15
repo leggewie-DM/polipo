@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,17 +22,19 @@ THE SOFTWARE.
 
 #define CONFIG_INT 0
 #define CONFIG_OCTAL 1
-#define CONFIG_TIME 2
-#define CONFIG_BOOLEAN 3
-#define CONFIG_TRISTATE 4
-#define CONFIG_TETRASTATE 5
-#define CONFIG_PENTASTATE 6
-#define CONFIG_FLOAT 7
-#define CONFIG_ATOM 8
-#define CONFIG_ATOM_LOWER 9
-#define CONFIG_INT_LIST 10
-#define CONFIG_ATOM_LIST 11
-#define CONFIG_ATOM_LIST_LOWER 12
+#define CONFIG_HEX 2
+#define CONFIG_TIME 3
+#define CONFIG_BOOLEAN 4
+#define CONFIG_TRISTATE 5
+#define CONFIG_TETRASTATE 6
+#define CONFIG_PENTASTATE 7
+#define CONFIG_FLOAT 8
+#define CONFIG_ATOM 9
+#define CONFIG_ATOM_LOWER 10
+#define CONFIG_PASSWORD 11
+#define CONFIG_INT_LIST 12
+#define CONFIG_ATOM_LIST 13
+#define CONFIG_ATOM_LIST_LOWER 14
 
 typedef struct _ConfigVariable {
     AtomPtr name;
@@ -44,14 +46,23 @@ typedef struct _ConfigVariable {
         struct _AtomList **al;
         struct _IntList **il;
     } value;
+    int (*setter)(struct _ConfigVariable*, void*);
     char *help;
     struct _ConfigVariable *next;
 } ConfigVariableRec, *ConfigVariablePtr;
 
 #define CONFIG_VARIABLE(name, type, help) \
-    declareConfigVariable(internAtom(#name), type, &name, help)
+    CONFIG_VARIABLE_SETTABLE(name, type, NULL, help)
 
-void declareConfigVariable(AtomPtr name, int type, void *value, char *help);
+#define CONFIG_VARIABLE_SETTABLE(name, type, setter, help) \
+    declareConfigVariable(internAtom(#name), type, &name, setter, help)
+
+void declareConfigVariable(AtomPtr name, int type, void *value, 
+                           int (*setter)(ConfigVariablePtr, void*),
+                           char *help);
 void printConfigVariables(FILE *out, int html);
-int parseConfigLine(char *line, char *filename, int lineno);
+int parseConfigLine(char *line, char *filename, int lineno, int set);
 int parseConfigFile(AtomPtr);
+int configIntSetter(ConfigVariablePtr, void*);
+int configFloatSetter(ConfigVariablePtr, void*);
+int configAtomSetter(ConfigVariablePtr, void*);

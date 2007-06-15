@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -28,18 +28,19 @@ THE SOFTWARE.
 
 struct _HTTPRequest;
 
-typedef struct _ObjectHandler {
-    struct _ObjectHandler *previous, *next;
-    struct _Object *object;
-    int (*handler)(int, struct _ObjectHandler*);
-    char data[1];
-} ObjectHandlerRec, *ObjectHandlerPtr;
+#if defined(USHRT_MAX) && CHUNK_SIZE <= USHRT_MAX
+typedef unsigned short chunk_size_t;
+#else
+typedef unsigned int chunk_size_t;
+#endif
 
 typedef struct _Chunk {
-    int locked;
-    int size;
+    short int locked;
+    chunk_size_t size;
     char *data;
 } ChunkRec, *ChunkPtr;
+
+struct _Object;
 
 typedef int (*RequestFunction)(struct _Object *, int, int, int,
                                struct _HTTPRequest*, void*);
@@ -71,7 +72,7 @@ typedef struct _Object {
     int numchunks;
     ChunkPtr chunks;
     void *requestor;
-    ObjectHandlerPtr handlers;
+    struct _Condition condition;
     struct _DiskCacheEntry *disk_entry;
     struct _Object *next, *previous;
 } ObjectRec, *ObjectPtr;
@@ -102,7 +103,6 @@ extern int log2ObjectHashTableSize;
 /* object->type */
 #define OBJECT_HTTP 1
 #define OBJECT_DNS 2
-#define OBJECT_HTTP_TRANSCODED 3
 
 /* object->flags */
 /* object is public */
@@ -127,10 +127,8 @@ extern int log2ObjectHashTableSize;
 #define OBJECT_DISK_ENTRY_COMPLETE 512
 /* The object is suspected to be dynamic -- don't PMM */
 #define OBJECT_DYNAMIC 1024
-/* The object has been transcoded */
-#define OBJECT_TRANSCODED 2048
 /* Used for synchronisation between client and server. */
-#define OBJECT_MUTATING 4096
+#define OBJECT_MUTATING 2048
 
 /* object->cache_control and connection->cache_control */
 /* RFC 2616 14.9 */
@@ -156,13 +154,17 @@ extern int log2ObjectHashTableSize;
 #define CACHE_VARY 512
 /* set if Authorization header; treated specially */
 #define CACHE_AUTHORIZATION 1024
+/* set if cookie */
+#define CACHE_COOKIE 2048
+/* set if this object should never be combined with another resource */
+#define CACHE_MISMATCH 4096
 
 struct _HTTPRequest;
 
 void preinitObject(void);
 void initObject(void);
-ObjectPtr findObject(int type, void *key, int key_size);
-ObjectPtr makeObject(int type, void *key, int key_size,
+ObjectPtr findObject(int type, const void *key, int key_size);
+ObjectPtr makeObject(int type, const void *key, int key_size,
                      int public, int fromdisk,
                      int (*request)(ObjectPtr, int, int, int, 
                                     struct _HTTPRequest*, void*), void*);
@@ -176,21 +178,20 @@ void destroyObject(ObjectPtr object);
 void privatiseObject(ObjectPtr object, int linear);
 void abortObject(ObjectPtr object, int code, struct _Atom *message);
 void supersedeObject(ObjectPtr);
-ObjectHandlerPtr registerObjectHandler(ObjectPtr object,
-                                       int (*handler)(int, ObjectHandlerPtr),
-                                       int dsize, void *data);
-void unregisterObjectHandler(ObjectHandlerPtr);
-void abortObjectHandler(ObjectHandlerPtr);
 void notifyObject(ObjectPtr);
 void releaseNotifyObject(ObjectPtr);
 ObjectPtr objectPartial(ObjectPtr object, int length, struct _Atom *headers);
-int objectHoleSize(ObjectPtr object, int offset);
-int objectAddData(ObjectPtr object, char *data, int offset, int len);
-void objectPrintf(ObjectPtr object, int offset, char *format, ...)
-     ATTRIBUTE((format (printf, 3, 4)));
+int objectHoleSize(ObjectPtr object, int offset)
+    ATTRIBUTE ((pure));
+int objectHasData(ObjectPtr object, int from, int to)
+    ATTRIBUTE ((pure));
+int objectAddData(ObjectPtr object, const char *data, int offset, int len);
+void objectPrintf(ObjectPtr object, int offset, const char *format, ...)
+     ATTRIBUTE ((format (printf, 3, 4)));
 int discardObjectsHandler(TimeEventHandlerPtr);
 void writeoutObjects(int);
 int discardObjects(int all, int force);
-int objectIsStale(ObjectPtr object, CacheControlPtr cache_control);
-int objectMustRevalidate(ObjectPtr object, CacheControlPtr cache_control);
-
+int objectIsStale(ObjectPtr object, CacheControlPtr cache_control)
+    ATTRIBUTE ((pure));
+int objectMustRevalidate(ObjectPtr object, CacheControlPtr cache_control)
+    ATTRIBUTE ((pure));

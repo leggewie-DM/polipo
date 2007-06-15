@@ -1,13 +1,94 @@
+6 March 2007: Polipo 1.0.0
+
+        No changes since 0.9.99.2.
+
+7 February 2007: Polipo 0.9.99.2
+
+        Fixed a buffer overflow in urlDirname (the 0.9 branch is not
+        vulnerable) (reported by J. P. Larocque).
+        Implemented use of IPv6 temporary source addresses (Frank Behrens).
+        Disabled use of unaligned range requests by default.  This is
+        controlled by the variable allowUnalignedRangeRequests (reported
+        by Chris Moore).
+        Fixed descriptor leaks in SOCKS error handling (reported by
+        Roger Dingledine).
+        Implemented maxSideBuffering.
+
 6 February 2007: Polipo 0.9.12
 
         Fixed incorrect caching of redirects (reported by Lawrence Lu).
         Fixed a possible hang when falling back to gethostbyname
         (reported by Chris Moore).
 
+28 December 2006: Polipo 0.9.99.1
+
+        Validation improvements and bug fixes.
+        Don't use cached data when receiving the output from an HTTP/1.0 CGI.
+        Allowed tunnelling of IMAP and POP traffic by default.
+        Changed the disk cache expiry and indexing functions to use chunks.
+        Made the disk cache unreadable by others by default.
+        Fixed a bug that could cause stale data to be served after
+        a connection failure (reported by Hondza).
+        Fixed computation of age and rtt for pipelined requests.
+        Fixed incorrect cachability of redirects (reported by J.-P. Larocque).
+        Fixed a bug that would cause uncachable objects to become
+        cachable after being reloaded from the on-disk cache (reported
+        by J.-P. Larocque).
+        Implemented dontTrustVaryETag.
+
 7 December 2006: Polipo 0.9.11
 
         Fixed a crash that could happen when a network interface went down
         while a DNS query was in progress (reported by Francesco Zappa).
+
+20 November 2006: Polipo 0.9.99.0:
+
+        Implemented large buffers for headers larger than a chunk's worth.
+        Made the HTTP parser lax by default (ignores unknown headers).
+        Implemented the infrastructure for local POST requests and
+        implemented a real configuration interface (thanks to Theo Honohan).
+        Made timeouts user-configurable and enforced an invariant between
+        timeouts.
+        Made logging configurable at runtime (thanks to Frank Behrens).
+        Implemented the infrastructure for asynchronous handling of 
+        forbidden URLs.
+        Implemented the ability to redirect instead of returning an
+        error for forbidden URLs.
+        Implemented support for Squid-style redirectors.
+        Implemented User-configurable uncacheable URLs, analogous to
+        forbidden URLs (thanks to Joachim Haga).
+        Implemented the ability to avoid caching pages with cookies
+        and redirects.
+        Implemented maxPipelineTrain, which can be used to moderate
+        Polipo's eagerness to pipeline.
+        Unified parentHost and parentPort into parentProxy.
+        Ported Polipo to native Windows (thanks to Dan Kennedy).
+        Implemented disableVia.
+        Implemented SOCKS support.
+        Made disableVia and cacheIsShared to be true by default.
+        Increased the default value of serverMaxSlots to 8.
+        Made the disk cache code quote all characters except for a
+        small number of ``known safe'' ones.  This is an incompatible
+        change to the on-disk format.
+        Changed HTTP parser to pass all Pragma headers to the next
+        hop; this should make some media players work through Polipo.
+        Changed the connection scheduler to avoid pipelining when
+        there are idle connections to a given server.
+        Made Polipo obey parentProxy when tunnelling (proxying https).
+        Changed the default value of allowedPorts to be slightly more
+        permissive.
+        Implemented tweakables for selectively disabling parts of the
+        configuration interface.  Indexing and listing known servers
+        are now disabled by default.
+        Hide variables containing passwords.
+        Fixed a bug that could cause incorrect validation when speaking
+        to an HTTP/1.0 server.
+        Fixed a bug that could cause incorrect validation of Vary objects.
+        Fixed a crash in the redirector code.
+        Made disableVia the default, and changed the default value of idleTime.
+        Made polipo delay serving of partial objects until after a
+        a successful validation.  This should fix Mozilla's prefetching.
+        On 64-bit blatforms, made CHUNK_SIZE default to 8kB.
 
 2 September 2006: Polipo 0.9.10:
 

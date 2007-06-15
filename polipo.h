@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003, 2004 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,34 +26,37 @@ THE SOFTWARE.
 
 #include <sys/param.h>
 
+#ifdef __MINGW32_VERSION
+#define MINGW
+#endif
+
+#include <limits.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
 #include <assert.h>
-
-#include <sys/types.h>
-#include <sys/uio.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <signal.h>
-#include <sys/poll.h>
-#include <sys/wait.h>
 #include <time.h>
 #include <sys/time.h>
 #include <sys/stat.h>
-#include <sys/ioctl.h>
 #include <dirent.h>
+#ifndef MINGW
 #include <sys/mman.h>
-
-#include <regex.h>
-
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <sys/poll.h>
+#include <sys/wait.h>
+#include <sys/ioctl.h>
+#include <signal.h>
+#endif
 
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
@@ -84,6 +87,8 @@ THE SOFTWARE.
 #ifndef __UCLIBC__
 #define HAVE_TIMEGM
 #define HAVE_FTS
+#define HAVE_FFSL
+#define HAVE_FFSLL
 #endif
 #define HAVE_SETENV
 #define HAVE_ASPRINTF
@@ -102,9 +107,6 @@ THE SOFTWARE.
 #define HAVE_TM_GMTOFF
 #define HAVE_FTS
 #define HAVE_SETENV
-#ifdef __FreeBSD__
-#define HAVE_ASPRINTF
-#endif
 #endif
 
 #ifdef __CYGWIN__
@@ -131,14 +133,20 @@ THE SOFTWARE.
 #endif
 
 #ifdef __FreeBSD__
+#define HAVE_ASPRINTF
 #if __FreeBSD_version >= 400000
 #define HAVE_IPv6
+#define HAVE_TIMEGM
 #endif
 #endif
 
 #ifdef __NetBSD__
 #if __NetBSD_Version__ >= 105000000
 #define HAVE_IPv6
+#endif
+#if __NetBSD_Version__ >= 200000000
+#define HAVE_TIMEGM
+#define HAVE_ASPRINTF
 #endif
 #endif
 
@@ -154,13 +162,37 @@ THE SOFTWARE.
 #define UNALIGNED_ACCESS
 #endif
 
-#include "ftsimport.h"
+#ifndef MINGW
+#define HAVE_FORK
+#define HAVE_READV_WRITEV
+#define HAVE_FFS
+#define READ(x, y, z) read(x, y, z)
+#define WRITE(x, y, z) write(x, y, z)
+#define CLOSE(x) close(x)
+#else
+#ifndef HAVE_REGEX
+#define NO_FORBIDDEN
+#endif
+#endif
 
+#ifdef HAVE_READV_WRITEV
+#define WRITEV(x, y, z) writev(x, y, z)
+#define READV(x, y, z)  readv(x, y, z)
+#endif
+
+#ifndef HAVE_FORK
+#define NO_REDIRECTOR
+#endif
+
+#include "mingw.h"
+
+#include "ftsimport.h"
 #include "atom.h"
 #include "util.h"
 #include "config.h"
 #include "event.h"
 #include "io.h"
+#include "socks.h"
 #include "chunk.h"
 #include "object.h"
 #include "dns.h"

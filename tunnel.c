@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2004 by Juliusz Chroboczek
+Copyright (c) 2004-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -55,6 +55,8 @@ static int tunnelWrite1Handler(int, FdEventHandlerPtr, StreamRequestPtr);
 static int tunnelWrite2Handler(int, FdEventHandlerPtr, StreamRequestPtr);
 static int tunnelDnsHandler(int, GethostbynameRequestPtr);
 static int tunnelConnectionHandler(int, FdEventHandlerPtr, ConnectRequestPtr);
+static int tunnelSocksHandler(int, SocksRequestPtr);
+static int tunnelHandlerCommon(int, TunnelPtr);
 static int tunnelError(TunnelPtr, int, AtomPtr);
 
 static int
@@ -151,7 +153,15 @@ do_tunnel(int fd, char *buf, int offset, int len, AtomPtr url)
     
     releaseAtom(url);
 
-    do_gethostbyname(tunnel->hostname->string, 0, tunnelDnsHandler, tunnel);
+    if(socksParentProxy)
+        do_socks_connect(parentHost ?
+                         parentHost->string : tunnel->hostname->string,
+                         parentHost ? parentPort : tunnel->port,
+                         tunnelSocksHandler, tunnel);
+    else
+        do_gethostbyname(parentHost ?
+                         parentHost->string : tunnel->hostname->string, 0,
+                         tunnelDnsHandler, tunnel);
 }
 
 static int
@@ -175,7 +185,8 @@ tunnelDnsHandler(int status, GethostbynameRequestPtr request)
         return 1;
     }
 
-    do_connect(retainAtom(request->addr), 0, tunnel->port,
+    do_connect(retainAtom(request->addr), 0,
+               parentHost ? parentPort : tunnel->port,
                tunnelConnectionHandler, tunnel);
     return 1;
 }
@@ -186,7 +197,6 @@ tunnelConnectionHandler(int status,
                         ConnectRequestPtr request)
 {
     TunnelPtr tunnel = request->data;
-    const char *message = "HTTP/1.1 200 Tunnel established\r\n\r\n";
     int rc;
 
     if(status < 0) {
@@ -198,15 +208,72 @@ tunnelConnectionHandler(int status,
     if(rc < 0)
         do_log_error(L_WARN, errno, "Couldn't disable Nagle's algorithm");
 
+    return tunnelHandlerCommon(request->fd, tunnel);
+}
+
+static int
+tunnelSocksHandler(int status, SocksRequestPtr request)
+{
+    TunnelPtr tunnel = request->data;
+
+    if(status < 0) {
+        tunnelError(tunnel, 504, internAtomError(-status, "Couldn't connect"));
+        return 1;
+    }
+
+    return tunnelHandlerCommon(request->fd, tunnel);
+}
+
+static int
+tunnelHandlerParent(int fd, TunnelPtr tunnel)
+{
+    char *message;
+    int n;
+
+    tunnel->fd2 = fd;
+
+    tunnel->buf2.buf = get_chunk();
+    if(tunnel->buf2.buf == NULL) {
+        message = "Couldn't allocate buffer";
+        goto fail;
+    }
+
+    n = snnprintf(tunnel->buf2.buf, 0, CHUNK_SIZE,
+                  "CONNECT %s:%d HTTP/1.1"
+                  "\r\n\r\n",
+                  tunnel->hostname->string, tunnel->port);
+    if(n < 0) {
+        message = "Buffer overflow";
+        goto fail;
+    }
+    tunnel->buf2.head = n;
+    tunnelDispatch(tunnel);
+    return 1;
+
+ fail:
+    close(fd);
+    tunnel->fd2 = -1;
+    tunnelError(tunnel, 501, internAtom(message));
+    return 1;
+}
+
+static int
+tunnelHandlerCommon(int fd, TunnelPtr tunnel)
+{
+    const char *message = "HTTP/1.1 200 Tunnel established\r\n\r\n";
     assert(tunnel->buf1.buf == NULL);
+
+    if(parentHost)
+        return tunnelHandlerParent(fd, tunnel);
+
     tunnel->buf1.buf = get_chunk();
     if(tunnel->buf1.buf == NULL) {
-        close(request->fd);
+        close(fd);
         tunnelError(tunnel, 501, internAtom("Couldn't allocate buffer"));
         return 1;
     }
 
-    tunnel->fd2 = request->fd;
+    tunnel->fd2 = fd;
 
     memcpy(tunnel->buf2.buf, message, MIN(CHUNK_SIZE - 1, strlen(message)));
     tunnel->buf2.head = MIN(CHUNK_SIZE - 1, strlen(message));
