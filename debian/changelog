@@ -1,6 +1,13 @@
+polipo (1.0.1-1) unstable; urgency=low
+
+  * New upstream release
+  * New maintainer (closes: #430411)
+
+ -- Denis V. Sirotkin <fechiny@gmail.com>  Wed, 27 Jun 2007 14:37:06 +0600
+
 polipo (1.0.0-1) unstable; urgency=low
 
-  * New upstream release.
+  * New upstream release
 
  -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Fri, 15 Jun 2007 10:29:16 +0100
 

@@ -66,6 +66,7 @@ typedef struct _HTTPConnection {
     HTTPRequestPtr request_last;
     int serviced;
     int version;
+    int time;
     TimeEventHandlerPtr timeout;
     int te;
     char *reqbuf;
@@ -123,7 +124,7 @@ typedef struct _HTTPConnection {
 extern int disableProxy;
 extern AtomPtr proxyName;
 extern int proxyPort;
-extern int clientTimeout, serverTimeout;
+extern int clientTimeout, serverTimeout, serverIdleTimeout;
 extern int bigBufferSize;
 extern AtomPtr proxyAddress;
 extern int proxyOffline;
