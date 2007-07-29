@@ -1,3 +1,15 @@
+polipo (1.0.1-2) unstable; urgency=low
+
+  * Install the sample forbidden file into /etc/polipo
+  * Added network if-up/down scripts similar to ppp ip-up/down
+    (closes: #305852, #418715)
+  * Added debian/watch file
+  * debian/compat: changed debhelper compatibility to 5
+  * debian/control: changed Build-Depends on debhelper (>= 5)
+  * dpatch applied
+
+ -- Denis V. Sirotkin <fechiny@gmail.com>  Sun, 29 Jul 2007 18:25:25 +0600
+
 polipo (1.0.1-1) unstable; urgency=low
 
   * New upstream release

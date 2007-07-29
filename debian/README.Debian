@@ -5,7 +5,7 @@ Polipo is available from http://www.pps.jussieu.fr/~jch/software/polipo/.
 
 There was a webpage devoted to this Debian package which you can find at
 http://www.srcf.ucam.org/~teh30/debian/polipo/. But due new maintainer,
-new versions not available there.
+new versions not available there. Look up the Debian repository for it.
 
 
 How to use polipo for Debian
@@ -34,11 +34,17 @@ You might also want to set 'disableLocalInterface=true', otherwise all the
 proxy's users can see what pages the others have been accessing.
 
 
-  Using polipo with a modem connection
-  ------------------------------------
+  Using polipo with a modem or a mobile connection
+  ------------------------------------------------
 
-Polipo will go on- and offline automatically whenever a PPP (modem)
-connection is established or brought down.  If you don't want this behaviour
-then create a file /etc/polipo/options and add a line "noppp".
+Polipo will go on- and offline automatically whenever PPP (modem) or
+other network connections are established or brought down. You can
+specify on which type of connection this behaviour will occur by editing
+the file /etc/polipo/options and setting the method option to the
+appropriate value, i.e. `method ppp'. For IPv4 the following methods
+allowed: any for any method (default), static, manual, dhcp, bootp, ppp,
+wvdial. The loopback method is not applicable. You can find a list of
+these methods in the interfaces(5) manpage. Note: you can add multiple
+`method' lines in the options file.
 
- -- Tom Huckstep <tom@jaguarpaw.co.uk>, Sun, 29 Feb 2004 10:30:18 +0000
+ -- Denis V. Sirotkin <fechiny@gmail.com>, Sun, 29 Jul 2007 18:26:38 +0600

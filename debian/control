@@ -2,7 +2,7 @@ Source: polipo
 Section: web
 Priority: optional
 Maintainer: Denis V. Sirotkin <fechiny@gmail.com>
-Build-Depends: debhelper (>= 4.1.0), cdbs, texinfo
+Build-Depends: debhelper (>= 5), cdbs, texinfo, dpatch
 Standards-Version: 3.7.2
 
 Package: polipo
@@ -35,4 +35,4 @@ Description: a small, caching web proxy
  Optionally, Polipo can use a technique known as Poor Man's Multiplexing
  to reduce latency. 
  .
- Homepage: http://www.pps.jussieu.fr/~jch/software/polipo/
+  Homepage: http://www.pps.jussieu.fr/~jch/software/polipo/
