@@ -1,3 +1,9 @@
+polipo (1.0.2-1) unstable; urgency=low
+
+  * New upstream release (closes: #439441)
+
+ -- Denis V. Sirotkin <fechiny@gmail.com>  Mon, 27 Aug 2007 18:25:05 +0600
+
 polipo (1.0.1-2) unstable; urgency=low
 
   * Install the sample forbidden file into /etc/polipo

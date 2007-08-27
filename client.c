@@ -771,7 +771,6 @@ httpClientRequest(HTTPRequestPtr request, AtomPtr url)
             expect = NULL;
         }
         if(code) {
-            if(expect) releaseAtom(expect);
             request->flags |= REQUEST_FORCE_ERROR;
             httpClientDiscardBody(connection);
             httpClientNoticeErrorHeaders(request, code, message, challenge);
@@ -785,8 +784,14 @@ httpClientRequest(HTTPRequestPtr request, AtomPtr url)
     }
 
     if(expect) {
-        if(expect == atom100Continue) {
+        if(expect == atom100Continue && REQUEST_SIDE(request)) {
             request->flags |= REQUEST_WAIT_CONTINUE;
+        } else {
+            httpClientDiscardBody(connection);
+            httpClientNoticeError(request, 417,
+                                  internAtom("Expectation failed"));
+            releaseAtom(expect);
+            return 1;
         }
         releaseAtom(expect);
     }
@@ -817,6 +822,7 @@ httpClientRequest(HTTPRequestPtr request, AtomPtr url)
             httpClientNoticeError(request, 500,
                                   internAtom("CONNECT over big buffer "
                                              "not supported"));
+            return 1;
         }
         connection->flags &= ~CONN_READER;
         do_tunnel(connection->fd, connection->reqbuf, 
@@ -1243,6 +1249,9 @@ httpClientNoticeRequest(HTTPRequestPtr request, int novalidate)
     conditional = (haveData && request->method == METHOD_GET);
     if(!mindlesslyCacheVary && (request->object->cache_control & CACHE_VARY))
         conditional = conditional && (request->object->etag != NULL);
+
+    conditional =
+        conditional && !(request->object->cache_control & CACHE_MISMATCH);
 
     request->object->flags |= OBJECT_VALIDATING;
     rc = request->object->request(request->object,
