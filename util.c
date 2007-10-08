@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003-2006 by Juliusz Chroboczek
+Copyright (c) 2003-2007 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -39,12 +39,20 @@ int
 snnprintf(char *restrict buf, int n, int len, const char *format, ...)
 {
     va_list args;
+    int rc;
+    va_start(args, format);
+    rc = snnvprintf(buf, n, len, format, args);
+    va_end(args);
+    return rc;
+}
+
+int
+snnvprintf(char *restrict buf, int n, int len, const char *format, va_list args)
+{
     int rc = -1;
     if(n < 0) return -2;
-    va_start(args, format);
     if(n < len)
         rc = vsnprintf(buf + n, len - n, format, args);
-    va_end(args);
     if(rc >= 0 && n + rc <= len)
         return n + rc;
     else
@@ -750,3 +758,51 @@ intListCons(int from, int to, IntListPtr list)
     }
     return insertRange(from, to, list, i);
 }
+
+/* Return the amount of physical memory on the box, -1 if unknown or
+   over two gigs. */
+#if defined(__linux__)
+
+#include <sys/sysinfo.h>
+int
+physicalMemory()
+{
+    int rc;
+    struct sysinfo info;
+
+    rc = sysinfo(&info);
+    if(rc < 0)
+        return -1;
+
+    if(info.totalram <= 0x7fffffff / info.mem_unit)
+        return (int)(info.totalram * info.mem_unit);
+
+    return -1;
+}
+
+#elif defined(__FreeBSD__)
+
+#include <sys/sysctl.h>
+int
+physicalMemory()
+{
+    int membytes;
+    size_t len;
+    int res;
+
+    len = sizeof(membytes);
+    res = sysctlbyname("hw.physmem", &membytes, &len, NULL, 0);
+    if (res)
+        return -1;
+
+    return membytes;
+}
+
+#else
+
+int
+physicalMemory()
+{
+    return -1;
+}
+#endif

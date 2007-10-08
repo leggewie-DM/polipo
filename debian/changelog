@@ -1,3 +1,11 @@
+polipo (1.0.3-1) unstable; urgency=low
+
+  * New upstream release
+  * Changed pattern in the debian/watch to avoid searching testing versions
+    like `polipo-20071001'
+
+ -- Denis V. Sirotkin <fechiny@gmail.com>  Mon, 08 Oct 2007 19:21:32 +0600
+
 polipo (1.0.2-1) unstable; urgency=low
 
   * New upstream release (closes: #439441)

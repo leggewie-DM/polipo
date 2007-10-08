@@ -557,7 +557,6 @@ using the local configuration interface (@pxref{Web interface}).
 @cindex pid
 @vindex daemonise
 @vindex pidFile
-@vindex logLevel
 
 If the configuration variable @code{daemonise} is set to true, Polipo
 will run as a daemon: it will fork and detach from its controlling
@@ -572,20 +571,32 @@ is started, Polipo will refuse to run.
 @node Logging,  , Daemon, Polipo Invocation
 @subsection Logging
 @cindex logging
+@vindex logLevel
 @vindex logFile
+@vindex logSyslog
+@vindex logFacility
 
 When it encounters a difficulty, Polipo will print a friendly message.
 The location where these messages go is controlled by the
-configuration variable @code{logFile}.  If it is empty, messages go to
-the error output of the process (normally the terminal); otherwise, it
-is the name of a file where all output will accumulate.
+configuration variables @code{logFile} and @code{logSyslog}.
+If @code{logSyslog} is @code{true}, error messages go to the system log
+facility given by @code{logFacility}.  If @code{logFile} is set, it is
+the name of a file where all output will accumulate.  If @code{logSyslog}
+is @code{false} and @code{logFile} is empty, messages go to the error
+output of the process (normally the terminal).
 
 The variable @code{logFile} defaults to empty if @code{daemonise} is
 false, and to @samp{/var/log/polipo} otherwise.
 
+The variable @code{logSyslog} defaults to @code{false}, and
+@code{logFacility} defaults to @samp{user}.
+
 The amount of logging is controlled by the variable @code{logLevel}.
 Please see the file @samp{log.h} in the Polipo sources for the
 possible values of @code{logLevel}.
+
+(Note that if you are using a shared cache, or logging to syslog,
+an overly low @code{logLevel} could be a privacy violation.)
 
 @node Browser configuration, Stopping, Polipo Invocation, Running
 @section Configuring your browser
@@ -1408,21 +1419,23 @@ Polipo is an HTTP proxy; it proxies HTTP traffic, and clients using
 other protocols should either establish a direct connection to the
 server or use an @emph{ad hoc} proxy.
 
-Due to wide-spread brain-damage@footnote{Sometimes known as NAT.},
-however, there are some circumstances in which establishing a direct
-connection to the server is not possible.  In such situations, it is
-possible to have Polipo behave as a @emph{tunnelling} proxy --- a
-proxy that merely forwards traffic between the client and the server
-without understanding it.  Polipo enters tunnel mode when the client
-requests it by using the HTTP @samp{CONNECT} method.
+In many circumstances, however, it is not possible to establish
+a direct connection to the server, for example due to mis-configured
+firewalls or when trying to access the IPv4 Internet from an IPv6-only
+host.  In such situations, it is possible to have Polipo behave as
+a @emph{tunnelling} proxy --- a proxy that merely forwards traffic
+between the client and the server without understanding it.  Polipo
+enters tunnel mode when the client requests it by using the HTTP
+@samp{CONNECT} method.
 
 Most web browsers will use this technique for HTTP over SSL if
-configured to use Polipo as their `https proxy'.  OpenSSH can also use
-it to cross misconfigured firewalls.
+configured to use Polipo as their `https proxy'.  More generally, the
+author has successfully used it to cross mis-configured firewalls
+using OpenSSH, rsync, Jabber, IRC, etc.
 
 The variable @code{tunnelAllowedPorts} specifies the set of ports that
 Polipo will accept to tunnel traffic to.  It defaults to allowing ssh,
-HTTP, https, rsync, IMAP, imaps, POP and pops traffic.
+HTTP, https, rsync, IMAP, imaps, POP, pops, Jabber, CVS and Git traffic.
 
 @node Caching, Memory usage, Network, Top
 @chapter Caching
@@ -1861,9 +1874,11 @@ You can limit Polipo's usage of chunk memory by setting
 @code{chunkHighMark} and @code{chunkLowMark}.
 
 The value @code{chunkHighMark} is the absolute maximum number of bytes
-of allocated chunk memory.  When this value is reached, Polipo will
-try to purge objects from its in-memory cache; if that fails to free
-memory, Polipo will start dropping connections.
+of allocated chunk memory.  When this value is reached, Polipo will try
+to purge objects from its in-memory cache; if that fails to free memory,
+Polipo will start dropping connections.  This value defaults to
+24@dmn{MB} or one quarter of the machine's physical memory, whichever is
+less.
 
 When chunk usage falls back below @code{chunkLowMark}, Polipo will
 stop discarding in-memory objects.  The value

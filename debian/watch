@@ -1,2 +1,2 @@
 version=3
-http://www.pps.jussieu.fr/~jch/software/files/polipo/ polipo-(.*)\.tar\.gz
+http://www.pps.jussieu.fr/~jch/software/files/polipo/ polipo-(\d*\.\d*\.\d*)\.tar\.gz

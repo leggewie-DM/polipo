@@ -362,9 +362,29 @@ urlIsMatched(char *url, int length, DomainPtr *domains, regex_t *regex)
             domain++;
         }
     }
+
     if(regex) {
-        if(!regexec(regex, url, 0, NULL, 0))
-            return 1;
+        /* url is not necessarily 0-terminated */
+        char smallcopy[50];
+        char *urlcopy;
+        int rc;
+
+        if(length < 50) {
+            urlcopy = smallcopy;
+        } else {
+            urlcopy = malloc(length + 1);
+            if(urlcopy == NULL)
+                return 0;
+        }
+        memcpy(urlcopy, url, length);
+        urlcopy[length] = '\0';
+
+        rc = regexec(regex, urlcopy, 0, NULL, 0);
+
+        if(urlcopy != smallcopy)
+            free(urlcopy);
+
+        return !rc;
     }
     return 0;
 }
@@ -637,7 +657,7 @@ runRedirector(pid_t *pid_return, int *read_fd_return, int *write_fd_return)
 
     fflush(stdout);
     fflush(stderr);
-    fflush(logF);
+    flushLog();
 
     interestingSignals(&ss);
     do {
