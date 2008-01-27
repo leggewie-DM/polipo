@@ -2,8 +2,7 @@
 ## 10_makefile.dpatch by Denis V. Sirotkin <fechiny@gmail.com>
 ## Original changes was done by Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>
 ##
-## All lines beginning with `## DP:' are a description of the patch.
-## DP: Change install path and add copying config file to /etc/polipo
+## DP: Change description
 
 if [ $# -lt 1 ]; then
     echo "`basename $0`: script expects -patch|-unpatch as argument" >&2

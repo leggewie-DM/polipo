@@ -4,7 +4,7 @@
 # Required-Start:    $local_fs
 # Required-Stop:     $local_fs
 # Default-Start:     2 3 4 5
-# Default-Stop:      S 0 1 6
+# Default-Stop:      0 1 6
 # Short-Description: Start or stop the polipo web cache
 ### END INIT INFO
 #
@@ -25,6 +25,13 @@ DESC=polipo
 #if [ -f /etc/default/polipo ] ; then
 #	. /etc/default/polipo
 #fi
+
+# Make sure /var/run/polipo exists.
+if [ ! -e /var/run/$NAME ] ; then
+	mkdir -p /var/run/$NAME
+	chown proxy:proxy /var/run/$NAME
+	chmod 755 /var/run/$NAME
+fi
 
 case "$1" in
   start)

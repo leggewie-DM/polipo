@@ -1,0 +1,47 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 30_log-permission.dpatch by Denis V. Sirotkin <fechiny@gmail.com>
+##
+## DP: Set umask 026 so log files are opened with permission 750
+
+if [ $# -lt 1 ]; then
+    echo "`basename $0`: script expects -patch|-unpatch as argument" >&2
+    exit 1
+fi
+
+[ -f debian/patches/00patch-opts ] && . debian/patches/00patch-opts
+patch_opts="${patch_opts:--f --no-backup-if-mismatch} ${2:+-d $2}"
+
+case "$1" in
+    -patch) patch -p1 ${patch_opts} < $0;;
+    -unpatch) patch -R -p1 ${patch_opts} < $0;;
+    *)
+	echo "`basename $0`: script expects -patch|-unpatch as argument" >&2
+	exit 1;;
+esac
+
+exit 0
+
+@DPATCH@
+
+--- polipo-1.0.4.orig/log.c
++++ polipo-1.0.4/log.c
+@@ -80,7 +80,9 @@
+ 
+     if(logFile != NULL && logFile->length > 0) {
+         FILE *f;
++	mode_t mask = umask(026);
+         f = fopen(logFile->string, "a");
++	umask(mask);
+         if(f == NULL) {
+             do_log_error(L_ERROR, errno, "Couldn't open log file %s",
+                          logFile->string);
+@@ -340,7 +342,9 @@
+ {
+     if(logFile) {
+         FILE *f;
++	mode_t mask = umask(026);
+         f = fopen(logFile->string, "a");
++	umask(mask);
+         if(f == NULL) {
+             do_log_error(L_ERROR, errno, "Couldn't reopen log file %s",
+                          logFile->string);

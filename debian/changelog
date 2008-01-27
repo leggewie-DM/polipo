@@ -1,3 +1,24 @@
+polipo (1.0.4-1~bpo40+1) etch-backports; urgency=low
+
+  * Rebuilt for etch.
+
+ -- Andreas Metzler <ametzler@debian.org>  Sun, 27 Jan 2008 13:11:53 +0100
+
+polipo (1.0.4-1) unstable; urgency=low
+
+  * New upstream release
+  * Create /var/cache/polipo, /var/log/polipo and /var/run/polipo
+    directories by postinst script. /var/log/polipo now has proxy:adm
+    owners and 2755 rights, log files are proxy:adm 640 (closes: #291822)
+  * Remove /var/cache/polipo, /var/log/polipo and /var/run/polipo
+    directories by postrm script, make full cleanup on purging package
+  * debian/control: change Standards-Version to 3.7.3
+  * debian/control: move Homepage to pseudo-header
+  * init.d: make sure /var/run/polipo exists
+  * init.d: remove the S runlevel from Default-Stop
+
+ -- Denis V. Sirotkin <fechiny@gmail.com>  Fri, 11 Jan 2008 23:13:27 +0500
+
 polipo (1.0.3-1) unstable; urgency=low
 
   * New upstream release

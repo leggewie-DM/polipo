@@ -1,30 +1,56 @@
 #!/bin/sh
+# postinst script for polipo
+
 set -e
 
 CACHE_DIR=/var/cache/polipo
 PID_DIR=/var/run/polipo
 LOG_DIR=/var/log/polipo
 
-if [ "$1" = configure ]; then
-	for DIR in "$CACHE_DIR" "$PID_DIR" "$LOG_DIR"; do
-		if [ -d "$DIR" ]; then
-			chown proxy:proxy "$DIR"
-			chmod 750 "$DIR"
-		else
-			echo "Ignoring $DIR: doesn't exist"
-		fi
-	done
-fi
-
 IPUP_D=/etc/ppp/ip-up.d
 IPDOWN_D=/etc/ppp/ip-down.d
 
+case "$1" in
+    configure)
+
+# Creating needed directories
+        mkdir -p "$CACHE_DIR"
+	chown proxy:proxy "$CACHE_DIR"
+	chmod 750 "$CACHE_DIR"
+
+	mkdir -p "$PID_DIR"
+	chown proxy:proxy "$PID_DIR"
+	chmod 755 "$PID_DIR"
+
+	if [ -e "$LOG_DIR" ]; then
+	    chmod -R 640 "$LOG_DIR"
+	fi
+	mkdir -p "$LOG_DIR"
+	chown proxy:adm "$LOG_DIR"
+	chmod 2755 "$LOG_DIR"
+
 # /etc/ppp/ip-up/down.d/1polipo used to be called ip-up/down/polipo, so move
 # the old one out of the way
-for D in $IPUP_D $IPDOWN_D; do
-	if [ -e $D/polipo ]; then
-		mv $D/polipo $D/polipo.old
-	fi
-done
+	for D in "$IPUP_D" "$IPDOWN_D"; do
+	    if [ -e "$D/polipo" ]; then
+		mv "$D/polipo" "$D/polipo.old"
+	    fi
+	done
+
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+
+    ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
 
 #DEBHELPER#
+
+exit 0
+
+

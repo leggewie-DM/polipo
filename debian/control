@@ -3,7 +3,8 @@ Section: web
 Priority: optional
 Maintainer: Denis V. Sirotkin <fechiny@gmail.com>
 Build-Depends: debhelper (>= 5), cdbs, texinfo, dpatch
-Standards-Version: 3.7.2
+Standards-Version: 3.7.3
+Homepage: http://www.pps.jussieu.fr/~jch/software/polipo/
 
 Package: polipo
 Architecture: any
@@ -18,7 +19,7 @@ Description: a small, caching web proxy
   o Polipo will use HTTP/1.1 pipelining if it believes that the remote
   server supports it, whether the incoming requests are pipelined or
   come in simultaneously on multiple connections (this is more than the
-  simple usage of persistent connections, which is done by e.g.  Squid);
+  simple usage of persistent connections, which is done by e.g. Squid);
  .
   o Polipo will cache the initial segment of an instance if the
   download has been interrupted, and, if necessary, complete it later
@@ -30,9 +31,7 @@ Description: a small, caching web proxy
   chunked encoding);
  .
   o Polipo has fairly complete support for IPv6 (except for scoped
-  (link-local) addresses). 
+  (link-local) addresses).
  .
  Optionally, Polipo can use a technique known as Poor Man's Multiplexing
- to reduce latency. 
- .
-  Homepage: http://www.pps.jussieu.fr/~jch/software/polipo/
+ to reduce latency.

@@ -2,7 +2,6 @@
 ## 20_config.dpatch by Denis V. Sirotkin <fechiny@gmail.com>
 ## Original changes was done by Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>
 ##
-## All lines beginning with `## DP:' are a description of the patch.
 ## DP: Change description
 
 if [ $# -lt 1 ]; then

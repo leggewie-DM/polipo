@@ -1,0 +1,44 @@
+#!/bin/sh
+# postrm script for polipo
+
+set -e
+
+CACHE_DIR=/var/cache/polipo
+PID_DIR=/var/run/polipo
+LOG_DIR=/var/log/polipo
+
+IPUP_D=/etc/ppp/ip-up.d
+IPDOWN_D=/etc/ppp/ip-down.d
+
+case "$1" in
+    purge)
+
+# Remove polipo related directories
+	for DIR in "$CACHE_DIR" "$PID_DIR" "$LOG_DIR"; do
+	    echo -n "Purging $DIR..."
+	    rm -rf "$DIR"
+	    echo " done"
+	done
+
+# Removing old /etc/ppp/ip-up/down.d/ scripts
+	for D in "$IPUP_D" "$IPDOWN_D"; do
+	    if [ -e "$D/polipo.old" ]; then
+		rm -f "$D/polipo.old"
+	    fi
+	done
+
+    ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+
+    ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+
+esac
+
+#DEBHELPER#
+
+exit 0
