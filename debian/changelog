@@ -1,16 +1,10 @@
-polipo (1.0.4-1+lenny1) stable-security; urgency=high
+polipo (1.0.4-1.1) unstable; urgency=medium
 
-  [ Stefan Fritsch ]
-  * Non-maintainer upload by the Security Team.
-  * Backport various security related bug fixes from upstream git.
+  * Non-maintainer upload for RC bug fix.
   * Fix segfault when server sends Cache-Control: max-age without a value
-    (closes: #547047, CVE-2009-3305).
+    (closes: #547047).
 
-  [ Andreas Kirschbaum ]
-  * Apply upstream commit to fix DoS via overly large "Content-Length"
-    header; fixes CVE-2009-4413 (closes: #560779)
-
- -- Stefan Fritsch <sf@debian.org>  Wed, 17 Feb 2010 20:31:37 +0100
+ -- Stefan Fritsch <sf@debian.org>  Wed, 23 Sep 2009 21:29:43 +0200
 
 polipo (1.0.4-1) unstable; urgency=low
 
