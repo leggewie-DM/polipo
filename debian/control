@@ -1,7 +1,7 @@
 Source: polipo
 Section: web
 Priority: optional
-Maintainer: Denis V. Sirotkin <fechiny@gmail.com>
+Maintainer: Debian QA Group <packages@qa.debian.org>
 Build-Depends: debhelper (>= 5), cdbs, texinfo, dpatch
 Standards-Version: 3.7.3
 Homepage: http://www.pps.jussieu.fr/~jch/software/polipo/

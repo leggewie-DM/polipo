@@ -1,3 +1,16 @@
+polipo (1.0.4-2) unstable; urgency=high
+
+  [ Andreas Kirschbaum ]
+  * Apply upstream commit to fix DoS via overly large "Content-Length"
+    header; fixes CVE-2009-3305 (closes: #560779)
+
+  [ Julien Cristau ]
+  * QA upload.
+  * Set Maintainer to Debian QA Group (see #566150).
+  * High urgency for RC bugfix.
+
+ -- Julien Cristau <jcristau@debian.org>  Wed, 27 Jan 2010 15:01:52 +0100
+
 polipo (1.0.4-1.1) unstable; urgency=medium
 
   * Non-maintainer upload for RC bug fix.

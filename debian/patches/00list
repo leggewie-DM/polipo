@@ -2,3 +2,4 @@
 20_config.dpatch
 30_log-permission.dpatch
 40_segfault_max_age.dpatch
+50_integer_overflow.dpatch
