@@ -1,0 +1,204 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 
+##
+## DP: Backport various things that may be security relevant from upstream git 
+
+if [ $# -lt 1 ]; then
+    echo "`basename $0`: script expects -patch|-unpatch as argument" >&2
+    exit 1
+fi
+
+[ -f debian/patches/00patch-opts ] && . debian/patches/00patch-opts
+patch_opts="${patch_opts:--f --no-backup-if-mismatch} ${2:+-d $2}"
+
+case "$1" in
+    -patch) patch -p1 ${patch_opts} < $0;;
+    -unpatch) patch -R -p1 ${patch_opts} < $0;;
+    *)
+	echo "`basename $0`: script expects -patch|-unpatch as argument" >&2
+	exit 1;;
+esac
+
+exit 0
+
+@DPATCH@
+#commit ceb92be5468c87ce67a6c6b376048d43d54f6b1a
+#Author: Christopher Davis <chrisd@mangrin.org>
+#Date:   Fri Jan 8 15:44:48 2010 -0800
+#
+#    Prevent an infinite loop when a bodyless 204 or 1xx response is encountered.
+#
+#    Hopefully, this should fix bug #1185.
+#
+#commit a0027299bef899be52864ae98818704c48c468e9
+#Author: Christopher Davis <chrisd@mangrin.org>
+#Date:   Fri Jan 8 18:51:36 2010 -0800
+#
+#    Don't crash when we get an error while waiting for 100 continue status.
+#
+#    cheery-picked from bd0263bbe16f659e3b94cdc13780e61908df80b2
+#
+#commit 53f62776ca5af6cf3ea837a81434f01cd50603b4
+#Author: Jacob Appelbaum <jacob@appelbaum.net>
+#Date:   Thu Dec 10 22:13:02 2009 +0200
+#
+#    Add an extra sanity check to avoid memmove segfault
+#    (cherry picked from commit 817bd364275942381e37bf2111493de4769e319c)
+#
+diff --git a/client.c b/client.c
+index 0fddb9b..840cd28 100644
+--- a/client.c
++++ b/client.c
+@@ -998,7 +998,8 @@ httpClientDiscardBody(HTTPConnectionPtr connection)
+         return 1;
+     }
+ 
+-    if(connection->reqlen > connection->reqbegin) {
++    if(connection->reqlen > connection->reqbegin &&
++       (connection->reqlen - connection->reqbegin) > 0) {
+         memmove(connection->reqbuf, connection->reqbuf + connection->reqbegin,
+                 connection->reqlen - connection->reqbegin);
+         connection->reqlen -= connection->reqbegin;
+@@ -1161,7 +1162,9 @@ httpClientNoticeRequest(HTTPRequestPtr request, int novalidate)
+         request->to = -1;
+     }
+ 
+-    if(request->method == METHOD_HEAD)
++    if(request->method == METHOD_HEAD ||
++       request->object->code == 204 ||
++       request->object->code < 200)
+         haveData = !(request->object->flags & OBJECT_INITIAL);
+     else
+         haveData = 
+@@ -1362,11 +1365,10 @@ httpClientGetHandler(int status, ConditionHandlerPtr chandler)
+     }
+ 
+     if(request->flags & REQUEST_WAIT_CONTINUE) {
+-        if(request->request && 
+-           !(request->request->flags & REQUEST_WAIT_CONTINUE)) {
+-            request->flags &= ~REQUEST_WAIT_CONTINUE;
++        request->flags &= ~REQUEST_WAIT_CONTINUE;
++        if(object->code == 100 && request->request &&
++           !(request->request->flags & REQUEST_WAIT_CONTINUE))
+             delayedHttpClientContinue(connection);
+-        }
+         return 0;
+     }
+ 
+@@ -2121,7 +2123,9 @@ httpServeObjectStreamHandlerCommon(int kind, int status,
+         return 1;
+     }
+ 
+-    if(connection->request->method == METHOD_HEAD ||
++    if(request->method == METHOD_HEAD ||
++       request->object->code == 204 ||
++       request->object->code < 200 ||
+        condition_result == CONDITION_NOT_MODIFIED) {
+         httpClientFinish(connection, 0);
+         return 1;
+diff --git a/server.c b/server.c
+index b82c98c..12bb8bf 100644
+--- a/server.c
++++ b/server.c
+@@ -42,7 +42,6 @@ int maxConnectionRequests = 400;
+ 
+ static HTTPServerPtr servers = 0;
+ 
+-static int httpServerContinueConditionHandler(int, ConditionHandlerPtr);
+ static int initParentProxy(void);
+ static int parentProxySetter(ConfigVariablePtr var, void *value);
+ static void httpServerDelayedFinish(HTTPConnectionPtr);
+@@ -1023,18 +1022,9 @@ httpServerDoSide(HTTPConnectionPtr connection)
+             connection->reqlen = 0;
+         }
+         if(request->flags & REQUEST_WAIT_CONTINUE) {
+-            ConditionHandlerPtr chandler;
+             do_log(D_SERVER_CONN, "W... %s:%d.\n",
+-                   connection->server->name, connection->server->port);
+-            chandler = 
+-                conditionWait(&request->object->condition,
+-                              httpServerContinueConditionHandler,
+-                              sizeof(connection), &connection);
+-            if(chandler)
+-                return 1;
+-            else
+-                do_log(L_ERROR, "Couldn't register condition handler.\n");
+-            /* Fall through -- the client side will clean up. */
++                  connection->server->name, connection->server->port);
++            return 1;
+         }
+         client->flags |= CONN_SIDE_READER;
+         do_stream(IO_READ | (done ? IO_IMMEDIATE : 0 ) | IO_NOTNOW,
+@@ -1137,17 +1127,6 @@ httpServerSideHandler2(int status,
+     return httpServerSideHandlerCommon(2, status, event, srequest);
+ }
+ 
+-static int
+-httpServerContinueConditionHandler(int status, ConditionHandlerPtr chandler)
+-{
+-    HTTPConnectionPtr connection = *(HTTPConnectionPtr*)chandler->data;
+-
+-    if(connection->request->flags & REQUEST_WAIT_CONTINUE)
+-        return 0;
+-    httpServerDelayedDoSide(connection);
+-    return 1;
+-}
+-
+ /* s is 0 to keep the connection alive, 1 to shutdown the connection */
+ void
+ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
+@@ -1878,6 +1857,7 @@ httpServerHandlerHeaders(int eof,
+     AtomPtr message = NULL;
+     int suspectDynamic;
+     AtomPtr url = NULL;
++    int waiting = 0;
+ 
+     assert(request->object->flags & OBJECT_INPROGRESS);
+     assert(eof >= 0);
+@@ -1885,8 +1865,9 @@ httpServerHandlerHeaders(int eof,
+     httpSetTimeout(connection, -1);
+ 
+     if(request->flags & REQUEST_WAIT_CONTINUE) {
++        waiting = 1;
+         do_log(D_SERVER_CONN, "W   %s:%d.\n",
+-               connection->server->name, connection->server->port);
++               scrub(connection->server->name), connection->server->port);
+         request->flags &= ~REQUEST_WAIT_CONTINUE;
+     }
+ 
+@@ -1934,17 +1915,33 @@ httpServerHandlerHeaders(int eof,
+     if(date < 0)
+         date = current_time.tv_sec;
+ 
++    object->code = code;
+     if(code == 100) {
++        if(!REQUEST_SIDE(request)) {
++            httpServerAbort(connection, 1, 502,
++                            internAtom("Unexpected continue status"));
++            goto fail;
++        }
+         releaseAtom(url);
+         releaseAtom(message);
+         /* We've already reset wait_continue above, but we must still
+-           ensure that the writer notices. */
+-        notifyObject(request->object);
++           ensure that the writer notices if it is waiting. The server
++           may send continue status for POST or PUT requests, even when
++           we don't expect it. */
++        if(waiting) {
++            httpServerDelayedDoSide(connection);
++            notifyObject(object);
++        }
+         connection->len -= rc;
+         if(connection->len > 0)
+             memmove(connection->buf, connection->buf + rc, connection->len);
+         httpServerReply(connection, 1);
+         return 1;
++    } else if(waiting) {
++        /* The server responded with something other than 100 Continue,
++           but the client side is still has its flag set. Tell it to clear
++           it now. */
++        notifyObject(object);
+     }
+ 
+     if(code == 101) {
