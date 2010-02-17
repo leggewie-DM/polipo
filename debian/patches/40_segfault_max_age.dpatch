@@ -1,0 +1,77 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+##
+## DP: http://bugs.debian.org/cgi-bin/bugreport.cgi?bug=547047
+
+if [ $# -lt 1 ]; then
+    echo "`basename $0`: script expects -patch|-unpatch as argument" >&2
+    exit 1
+fi
+
+[ -f debian/patches/00patch-opts ] && . debian/patches/00patch-opts
+patch_opts="${patch_opts:--f --no-backup-if-mismatch} ${2:+-d $2}"
+
+case "$1" in
+    -patch) patch -p1 ${patch_opts} < $0;;
+    -unpatch) patch -R -p1 ${patch_opts} < $0;;
+    *)
+        echo "`basename $0`: script expects -patch|-unpatch as argument" >&2
+        exit 1;;
+esac
+
+exit 0
+
+@DPATCH@
+--- polipo-1.0.4.orig/http_parse.c
++++ polipo-1.0.4/http_parse.c
+@@ -1088,9 +1088,10 @@
+                                  (v_end >= 0 ? v_end : token_end) -
+                                  token_start);
+                         do_log(L_WARN, "\n");
++                    } else {
++                        a = atoi(buf + v_start);
++                        cache_control.max_age = a;
+                     }
+-                    a = atoi(buf + v_start);
+-                    cache_control.max_age = a;
+                 } else if(token_compare(buf, token_start, token_end,
+                                         "s-maxage")) {
+                     int a;
+@@ -1100,9 +1101,10 @@
+                                  (v_end >= 0 ? v_end : token_end) -
+                                  token_start);
+                         do_log(L_WARN, "\n");
++                    } else {
++                        a = atoi(buf + v_start);
++                        cache_control.max_age = a;
+                     }
+-                    a = atoi(buf + v_start);
+-                    cache_control.max_age = a;
+                 } else if(token_compare(buf, token_start, token_end,
+                                         "min-fresh")) {
+                     int a;
+@@ -1112,9 +1114,10 @@
+                                  (v_end >= 0 ? v_end : token_end) -
+                                  token_start);
+                         do_log(L_WARN, "\n");
++                    } else {
++                        a = atoi(buf + v_start);
++                        cache_control.max_age = a;
+                     }
+-                    a = atoi(buf + v_start);
+-                    cache_control.max_age = a;
+                 } else if(token_compare(buf, token_start, token_end,
+                                         "max-stale")) {
+                     int a;
+@@ -1124,9 +1127,10 @@
+                                  (v_end >= 0 ? v_end : token_end) -
+                                  token_start);
+                         do_log(L_WARN, "\n");
++                    } else {
++                        a = atoi(buf + v_start);
++                        cache_control.max_stale = a;
+                     }
+-                    a = atoi(buf + v_start);
+-                    cache_control.max_stale = a;
+                 } else {
+                     do_log(L_WARN, "Unsupported Cache-Control directive ");
+                     do_log_n(L_WARN, buf + token_start, 
