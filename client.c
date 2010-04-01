@@ -978,7 +978,7 @@ httpClientDiscardBody(HTTPConnectionPtr connection)
     if(connection->bodylen < 0)
         goto fail;
 
-    if(connection->bodylen + connection->reqbegin < connection->reqlen) {
+    if(connection->bodylen < connection->reqlen - connection->reqbegin) {
         connection->reqbegin += connection->bodylen;
         connection->bodylen = 0;
     } else {
@@ -998,7 +998,8 @@ httpClientDiscardBody(HTTPConnectionPtr connection)
         return 1;
     }
 
-    if(connection->reqlen > connection->reqbegin) {
+    if(connection->reqlen > connection->reqbegin &&
+       (connection->reqlen - connection->reqbegin) > 0) {
         memmove(connection->reqbuf, connection->reqbuf + connection->reqbegin,
                 connection->reqlen - connection->reqbegin);
         connection->reqlen -= connection->reqbegin;
@@ -1161,7 +1162,9 @@ httpClientNoticeRequest(HTTPRequestPtr request, int novalidate)
         request->to = -1;
     }
 
-    if(request->method == METHOD_HEAD)
+    if(request->method == METHOD_HEAD ||
+       request->object->code == 204 ||
+       request->object->code < 200)
         haveData = !(request->object->flags & OBJECT_INITIAL);
     else
         haveData = 
@@ -1362,11 +1365,10 @@ httpClientGetHandler(int status, ConditionHandlerPtr chandler)
     }
 
     if(request->flags & REQUEST_WAIT_CONTINUE) {
-        if(request->request && 
-           !(request->request->flags & REQUEST_WAIT_CONTINUE)) {
-            request->flags &= ~REQUEST_WAIT_CONTINUE;
+        request->flags &= ~REQUEST_WAIT_CONTINUE;
+        if(object->code == 100 && request->request &&
+           !(request->request->flags & REQUEST_WAIT_CONTINUE))
             delayedHttpClientContinue(connection);
-        }
         return 0;
     }
 
@@ -2121,7 +2123,9 @@ httpServeObjectStreamHandlerCommon(int kind, int status,
         return 1;
     }
 
-    if(connection->request->method == METHOD_HEAD ||
+    if(request->method == METHOD_HEAD ||
+       request->object->code == 204 ||
+       request->object->code < 200 ||
        condition_result == CONDITION_NOT_MODIFIED) {
         httpClientFinish(connection, 0);
         return 1;

@@ -1,3 +1,19 @@
+polipo (1.0.4.1-1) unstable; urgency=low
+
+  * New maintainer.
+  * New upstream release.
+  * Update Standards-Version to 3.8.4. 
+  * Remove duplicate word in long description (closes: #574613) 
+  * Remove 30_log-permission patch. (closes: #481601)
+  * Remove 40_segfault_max_age.dpatch. (closes: #547047)
+  * Remove 50_integer_overflow.dpatch. Fixed upstream.
+  * Remove 60_security_fixes.dpatch. Fixed upstream.
+  * Put /var/cache/polipo and /var/log/polipo in the .deb and 
+    stop managing them in postinst and postrm.
+  * Remove offline and online options from polipo-control.
+
+ -- Erinn Clark <erinn@torproject.org>  Wed, 31 Mar 2010 19:26:20 -0700
+
 polipo (1.0.4-3) unstable; urgency=high
 
   * QA upload.

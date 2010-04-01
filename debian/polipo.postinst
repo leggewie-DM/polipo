@@ -4,7 +4,6 @@
 set -e
 
 CACHE_DIR=/var/cache/polipo
-PID_DIR=/var/run/polipo
 LOG_DIR=/var/log/polipo
 
 IPUP_D=/etc/ppp/ip-up.d
@@ -17,10 +16,6 @@ case "$1" in
         mkdir -p "$CACHE_DIR"
 	chown proxy:proxy "$CACHE_DIR"
 	chmod 750 "$CACHE_DIR"
-
-	mkdir -p "$PID_DIR"
-	chown proxy:proxy "$PID_DIR"
-	chmod 755 "$PID_DIR"
 
 	if [ -e "$LOG_DIR" ]; then
 	    chmod -R 640 "$LOG_DIR"

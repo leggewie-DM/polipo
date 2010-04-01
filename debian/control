@@ -1,9 +1,9 @@
 Source: polipo
 Section: web
 Priority: optional
-Maintainer: Debian QA Group <packages@qa.debian.org>
+Maintainer: Erinn Clark <erinn@torproject.org>
 Build-Depends: debhelper (>= 5), cdbs, texinfo, dpatch
-Standards-Version: 3.7.3
+Standards-Version: 3.8.4
 Homepage: http://www.pps.jussieu.fr/~jch/software/polipo/
 
 Package: polipo
@@ -12,7 +12,7 @@ Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: a small, caching web proxy
  Polipo is a caching web proxy (a web cache) designed to be used by one
  person or a small group of people. It is similar in spirit to WWWOFFLE, but
- the implementation techniques are more like the ones ones used by Squid.
+ the implementation techniques are more like the ones used by Squid.
  .
  Polipo has some features that are unique among currently available proxies:
  .
