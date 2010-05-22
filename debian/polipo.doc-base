@@ -2,7 +2,7 @@ Document: polipo
 Title: Debian polipo Manual
 Author: Juliusz Chroboczek
 Abstract: The Polipo web cache
-Section: web
+Section: Network/Web Browsing
 
 Format: Info
 Index: /usr/share/info/polipo.info.gz

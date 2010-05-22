@@ -1,3 +1,17 @@
+polipo (1.0.4.1-1.1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * Delete obsolete /etc/network/if-{up,down}.d and /etc/ppp/ip-{up,down}.d
+    scripts (closes: #578684).
+  * Add patch cherry-picked from upstream git to stop ignoring CNAMEs after a
+    DNS timeout (closes: #540912).
+  * Add dependency on $remote_fs to init.d script (it needs /usr).  Pointed
+    out by lintian.
+  * Change doc-base section from web to Network/Web Browsing.  Pointed out by
+    lintian.
+
+ -- Julien Cristau <jcristau@debian.org>  Sat, 22 May 2010 14:09:29 +0200
+
 polipo (1.0.4.1-1) unstable; urgency=low
 
   * New maintainer.

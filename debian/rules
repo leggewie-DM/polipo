@@ -3,8 +3,6 @@ include /usr/share/cdbs/1/rules/dpatch.mk
 include /usr/share/cdbs/1/rules/debhelper.mk
 include /usr/share/cdbs/1/class/makefile.mk
 include debian/cdbs/helper-scripts.mk
-include debian/cdbs/ip-updown.mk
-include debian/cdbs/if-updown.mk
 include debian/cdbs/options.mk
 
 DEB_MAKE_INVOKE = $(DEB_MAKE_ENVVARS) make -C $(DEB_BUILDDIR)

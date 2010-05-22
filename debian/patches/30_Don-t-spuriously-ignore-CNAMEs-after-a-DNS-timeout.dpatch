@@ -1,0 +1,45 @@
+#! /bin/sh /usr/share/dpatch/dpatch-run
+## 30_Don-t-spuriously-ignore-CNAMEs-after-a-DNS-timeout.dpatch by Alan Jenkins
+##
+## All lines beginning with `## DP:' are a description of the patch.
+## DP: Don't spuriously ignore CNAMEs after a DNS timeout
+## DP: cherry-picked from 1144bc9a25fe685bf5a8d18a22d4fa79b9ade75b
+
+@DPATCH@
+
+From 1144bc9a25fe685bf5a8d18a22d4fa79b9ade75b Mon Sep 17 00:00:00 2001
+From: Juliusz Chroboczek <jch@pps.jussieu.fr>
+Date: Tue, 10 Nov 2009 16:48:04 -0800
+Subject: [PATCH] Don't spuriously ignore CNAMEs after a DNS timeout.
+
+Ignore-this: 60fbb7453699ecbff6961bf1622dfb3
+From Alan Jenkins.
+
+darcs-hash:20091111004804-4cc09-0d24709fbdebd5a7bdc5ce01a6a76aab5bc1241c.gz
+---
+ dns.c |    9 +++++++++
+ 1 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/dns.c b/dns.c
+index 8d4ac75..1a5b39b 100644
+--- a/dns.c
++++ b/dns.c
+@@ -1181,6 +1181,15 @@ dnsReplyHandler(int abort, FdEventHandlerPtr event)
+         } else
+             releaseAtom(value);
+     } else if(af == 0) {
++        /* Ignore errors in this case. */
++        if(query->inet4 && query->inet4->length == 0) {
++            releaseAtom(query->inet4);
++            query->inet4 = NULL;
++        }
++        if(query->inet6 && query->inet6->length == 0) {
++            releaseAtom(query->inet6);
++            query->inet6 = NULL;
++        }
+         if(query->inet4 || query->inet6) {
+             do_log(L_WARN, "Host %s has both %s and CNAME -- "
+                    "ignoring CNAME.\n", scrub(query->name->string),
+-- 
+1.7.1
+
