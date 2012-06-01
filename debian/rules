@@ -5,6 +5,9 @@ include /usr/share/cdbs/1/class/makefile.mk
 include debian/cdbs/helper-scripts.mk
 include debian/cdbs/options.mk
 
+DPKG_EXPORT_BUILDFLAGS = 1
+include /usr/share/dpkg/buildflags.mk
+
 DEB_MAKE_INVOKE = $(DEB_MAKE_ENVVARS) make -C $(DEB_BUILDDIR)
 
 DEB_MAKE_BUILD_TARGET = all
