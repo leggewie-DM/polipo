@@ -365,6 +365,9 @@ tunnelRead1Handler(int status,
     }
     tunnel->buf1.head = request->offset % CHUNK_SIZE;
  done:
+    /* Keep buffer empty to avoid a deadlock */
+    if((tunnel->flags & TUNNEL_EPIPE2))
+        tunnel->buf1.tail = tunnel->buf1.head;
     tunnel->flags &= ~TUNNEL_READER1;
     tunnelDispatch(tunnel);
     return 1;
@@ -383,6 +386,9 @@ tunnelRead2Handler(int status,
     }
     tunnel->buf2.head = request->offset % CHUNK_SIZE;
 done:
+    /* Keep buffer empty to avoid a deadlock */
+    if((tunnel->flags & TUNNEL_EPIPE1))
+        tunnel->buf2.tail = tunnel->buf2.head;
     tunnel->flags &= ~TUNNEL_READER2;
     tunnelDispatch(tunnel);
     return 1;
@@ -397,6 +403,8 @@ tunnelWrite1Handler(int status,
         tunnel->flags |= TUNNEL_EPIPE1;
         if(status < 0 && status != -EPIPE)
             do_log_error(L_ERROR, -status, "Couldn't write to client");
+        /* Empty the buffer to avoid a deadlock */
+        tunnel->buf2.tail = tunnel->buf2.head;
         goto done;
     }
     tunnel->buf2.tail = request->offset % CHUNK_SIZE;
@@ -415,6 +423,8 @@ tunnelWrite2Handler(int status,
         tunnel->flags |= TUNNEL_EPIPE2;
         if(status < 0 && status != -EPIPE)
             do_log_error(L_ERROR, -status, "Couldn't write to server");
+        /* Empty the buffer to avoid a deadlock */
+        tunnel->buf1.tail = tunnel->buf1.head;
         goto done;
     }
     tunnel->buf1.tail = request->offset % CHUNK_SIZE;

@@ -547,6 +547,9 @@ writeHeaders(int fd, int *body_offset_return,
         n = format_time(buf, n, CHUNK_SIZE, object->atime);
     }
 
+    if(n < 0)
+        return -2;
+
     if(body_offset < 0)
         body_offset = chooseBodyOffset(n, object);
 
@@ -558,7 +561,7 @@ writeHeaders(int fd, int *body_offset_return,
 
     if(body_offset < 0)
         body_offset = n;
-    if(n > body_offset)
+    if(n < 0 || n > body_offset)
         return -2;
 
     if(n < body_offset)
@@ -602,14 +605,13 @@ static const MimeEntryRec mimeEntries[] = {
     { "png", "image/png" },
     { "gif", "image/gif" },
     { "jpeg", "image/jpeg" },
-    { "jpg", "image/jpg" },
-    { "pdf", "image/pdf" },
+    { "jpg", "image/jpeg" },
+    { "pdf", "application/pdf" },
     { "ps", "application/postscript" },
     { "tar", "application/x-tar" },
     { "pac", "application/x-ns-proxy-autoconfig" },
     { "css", "text/css" },
     { "js",  "application/x-javascript" },
-    { "dtd", "text/xml" },
     { "xml", "text/xml" },
     { "swf", "application/x-shockwave-flash" },
 };

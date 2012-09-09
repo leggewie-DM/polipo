@@ -7,6 +7,8 @@ DISK_CACHE_ROOT = /var/cache/polipo
 
 # CDEBUGFLAGS = -O
 
+# If using GCC 4, you will probably want to add -Wno-pointer-sign.
+
 # CC = gcc
 # CDEBUGFLAGS = -O -g -Wall -std=gnu99
 CDEBUGFLAGS = -O -g -Wall

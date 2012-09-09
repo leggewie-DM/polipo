@@ -508,7 +508,7 @@ really_do_gethostbyname(AtomPtr name, ObjectPtr object)
     else if(dnsQueryIPv6 >= 3)
         hints.ai_family = AF_INET6;
 
-    rc = getaddrinfo(name->string, NULL, NULL, &ai);
+    rc = getaddrinfo(name->string, NULL, &hints, &ai);
 
     switch(rc) {
     case 0: error = 0; break;
@@ -1115,6 +1115,7 @@ dnsReplyHandler(int abort, FdEventHandlerPtr event)
     if(value == NULL)
         value = internAtom("");
 
+ again:
     if(af == 4) {
         if(query->inet4 == NULL) {
             query->inet4 = value;
@@ -1133,6 +1134,9 @@ dnsReplyHandler(int abort, FdEventHandlerPtr event)
                    "ignoring CNAME.\n", query->name->string,
                    query->inet4 ? "A" : "AAAA");
             releaseAtom(value);
+            value = internAtom("");
+            af = query->inet4 ? 4 : 6;
+            goto again;
         } else {
             cname = value;
         }

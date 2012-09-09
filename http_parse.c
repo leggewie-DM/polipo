@@ -935,14 +935,21 @@ httpParseHeaders(int client, AtomPtr url,
                   name == atomXPolipoDate || name == atomXPolipoAccess) {
             time_t t;
             j = parse_time(buf, value_start, value_end, &t);
-            if(j < 0) {
-                t = 0;
+            if(j < 0 && name != atomExpires) {
+                do_log(L_WARN, "Couldn't parse %s: ", name->string);
+                do_log_n(L_WARN, buf + value_start, value_end - value_start);
+                do_log(L_WARN, "\n");
+                t = -1;
             }
-            if(name == atomDate)
-                date = t;
-            else if(name == atomExpires)
-                expires = t;
-            else if(name == atomLastModified)
+            if(name == atomDate) {
+                if(t >= 0)
+                    date = t;
+            } else if(name == atomExpires) {
+                if(t >= 0)
+                    expires = t;
+                else
+                    expires = 0;
+            } else if(name == atomLastModified)
                 last_modified = t;
             else if(name == atomIfModifiedSince)
                 ims = t;

@@ -37,6 +37,8 @@ int serverMaxSlots = 4;
 static HTTPServerPtr servers = 0;
 
 static int httpServerContinueObjectHandler(int, ObjectHandlerPtr);
+static void httpServerDelayedFinish(HTTPConnectionPtr);
+
 void
 preinitServer(void)
 {
@@ -854,6 +856,8 @@ httpServerDoSide(HTTPConnectionPtr connection)
 
     assert(connection->bodylen >= 0);
 
+    httpSetTimeout(connection, 60);
+
     if(connection->reqlen > 0) {
         /* Send the headers, but don't send any part of the body if
            we're in wait_continue. */
@@ -864,20 +868,31 @@ httpServerDoSide(HTTPConnectionPtr connection)
                     request->wait_continue ? 0 : len,
                     httpServerSideHandler2, connection);
         httpServerReply(connection, 0);
+    } else if(request->object->flags & OBJECT_ABORTED) {
+        if(connection->reqbuf)
+            dispose_chunk(connection->reqbuf);
+        connection->reqbuf = NULL;
+        connection->reqlen = 0;
+        pokeFdEvent(connection->fd, -ESHUTDOWN, POLLIN);
+        client->flags |= CONN_SIDE_READER;
+        do_stream(IO_READ | IO_IMMEDIATE,
+                  client->fd, 0, NULL, 0,
+                  httpClientSideHandler, client);
     } else if(!request->wait_continue && doflush) {
-        /* We cannot free connection->reqbuf, as httpServerFinish uses
+        /* Make sure there's a reqbuf, as httpServerFinish uses
            it to determine if there's a writer. */
+        if(connection->reqbuf == NULL)
+            connection->reqbuf = get_chunk();
+        assert(connection->reqbuf != NULL);
         do_stream(IO_WRITE,
                   connection->fd, 0,
                   client->reqbuf + client->reqbegin, len,
                   httpServerSideHandler, connection);
     } else {
-        if(done || connection->reqlen == 0) {
-            if(connection->reqbuf)
-                dispose_chunk(connection->reqbuf);
-            connection->reqbuf = NULL;
-            connection->reqlen = 0;
-        }
+        if(connection->reqbuf)
+            dispose_chunk(connection->reqbuf);
+        connection->reqbuf = NULL;
+        connection->reqlen = 0;
         if(request->wait_continue) {
             ObjectHandlerPtr ohandler;
             do_log(D_SERVER_CONN, "W... %s:%d.\n",
@@ -941,12 +956,15 @@ httpServerSideHandlerCommon(int kind, int status,
     assert(request->object->flags & OBJECT_INPROGRESS);
 
     if(status) {
+        do_log_error(L_ERROR, -status, "Couldn't write to server");
         dispose_chunk(connection->reqbuf);
         connection->reqbuf = NULL;
-        do_log_error(L_ERROR, -status, "Couldn't write to server");
-        httpServerAbortRequest(request, status != -ECLIENTRESET, 503, 
-                               internAtomError(-status, 
-                                               "Couldn't write to server"));
+        if(status != -ECLIENTRESET)
+            shutdown(connection->fd, 2);
+        abortObject(request->object, 503,
+                    internAtom("Couldn't write to server"));
+        /* Let the read side handle the error */
+        httpServerDoSide(connection);
         return 1;
     }
 
@@ -1024,6 +1042,18 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
     if(s == 0 && (!connection->request || !connection->request->persistent))
         s = 1;
 
+    if(connection->reqbuf) {
+        /* As most normal requests go out in a single packet, this is
+           extremely unlikely to happen.  As for POST/PUT requests,
+           they are not pipelined, so this can only happen if the
+           server sent an error reply early. */
+        assert(connection->fd >= 0);
+        shutdown(connection->fd, 1);
+        pokeFdEvent(connection->fd, -EDOSHUTDOWN, POLLOUT);
+        httpServerDelayedFinish(connection);
+        goto done;
+    }
+
     if(s >= 0 && request) {
         /* Update statistics about the server */
         int size = -1, d = -1, rtt = -1, rate = -1;
@@ -1065,20 +1095,6 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
 
     do_log(D_SERVER_CONN, "Done with server %s:%d connection (%d)\n",
            connection->server->name, connection->server->port, s);
-
-    if(connection->reqbuf) {
-        /* As most normal requests go out in a single packet, this is
-           extremely unlikely to happen.  As for POST/PUT requests,
-           they are not pipelined, so this can only happen if the
-           server sent an error reply early.  Hence, it's reasonable
-           to shut the connection down. */
-        do_log(L_WARN, "Connection to %s:%d finished while writing.\n",
-               server->name, server->port);
-        assert(connection->fd >= 0);
-        shutdown(connection->fd, 1);
-        pokeFdEvent(connection->fd, -EDOSHUTDOWN, POLLOUT);
-        goto done;
-    }
 
     assert(offset <= connection->len);
 
@@ -1175,6 +1191,35 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
 
  done:
     httpServerTrigger(server);
+}
+
+static int
+httpServerDelayedFinishHandler(TimeEventHandlerPtr event)
+{
+    HTTPConnectionPtr connection = *(HTTPConnectionPtr*)event->data;
+    httpServerFinish(connection, 1, 0);
+    return 1;
+}
+
+static void
+httpServerDelayedFinish(HTTPConnectionPtr connection)
+{
+    TimeEventHandlerPtr handler;
+
+    handler = scheduleTimeEvent(1, httpServerDelayedFinishHandler,
+                                sizeof(connection), &connection);
+    if(!handler) {
+        do_log(L_ERROR,
+               "Couldn't schedule delayed finish -- freeing memory.");
+        free_chunk_arenas();
+        handler = scheduleTimeEvent(1, httpServerDelayedFinishHandler,
+                                    sizeof(connection), &connection);
+        if(!handler) {
+            do_log(L_ERROR,
+                   "Couldn't schedule delayed finish -- aborting.\n");
+            polipoExit();
+        }
+    }
 }
 
 void
@@ -1550,12 +1595,7 @@ httpServerHandler(int status,
     if(connection->reqlen == 0) {
         do_log(D_SERVER_REQ, "Writing aborted on 0x%lx\n", 
                (unsigned long)connection);
-        dispose_chunk(connection->reqbuf);
-        connection->reqbuf = NULL;
-        shutdown(connection->fd, 2);
-        pokeFdEvent(connection->fd, -EDOSHUTDOWN, POLLIN | POLLOUT);
-        httpSetTimeout(connection, 60);
-        return 1;
+        goto fail;
     }
 
     if(status == 0 && !streamRequestDone(srequest)) {
@@ -1581,11 +1621,17 @@ httpServerHandler(int status,
             message = 
                 internAtomError(-status, "Couldn't send request to server");
         }
-        httpServerAbort(connection, status != -ECLIENTRESET, 502,
-                        message);
-        return 1;
+        goto fail;
     }
     
+    return 1;
+
+ fail:
+    dispose_chunk(connection->reqbuf);
+    connection->reqbuf = NULL;
+    shutdown(connection->fd, 2);
+    pokeFdEvent(connection->fd, -EDOSHUTDOWN, POLLIN);
+    httpSetTimeout(connection, 60);
     return 1;
 }
 
@@ -1622,6 +1668,10 @@ httpServerReplyHandler(int status,
 
     assert(request->object->flags & OBJECT_INPROGRESS);
     if(status < 0) {
+        if(connection->serviced >= 1) {
+            httpServerRestart(connection);
+            return 1;
+        }
         if(status != -ECLIENTRESET)
             do_log_error(L_ERROR, -status, "Read from server failed");
         httpServerAbort(connection, status != -ECLIENTRESET, 502, 
@@ -2234,10 +2284,10 @@ httpServerIndirectHandlerCommon(HTTPConnectionPtr connection, int eof)
                         objectMetadataChanged(request->object, 0);
                     } else if(request->object->length != 
                               request->object->size) {
+                        request->object->length = -1;
                         httpServerAbort(connection, 1, 502,
                                         internAtom("Inconsistent "
                                                    "object size"));
-                        request->object->length = -1;
                         return 1;
                     }
                 }

@@ -137,8 +137,6 @@ httpClientAbort(HTTPConnectionPtr connection, int closed)
     }
 }
 
-static void httpClientDelayedFinish(HTTPConnectionPtr connection);
-
 /* s is 1 in order to linger the connection, 2 to close it straight away. */
 void
 httpClientFinish(HTTPConnectionPtr connection, int s)
@@ -161,14 +159,13 @@ httpClientFinish(HTTPConnectionPtr connection, int s)
 
     if(connection->flags & CONN_SIDE_READER) {
         /* We're in POST or PUT and the reader isn't done yet.
-           We make sure the request is marked as failed, and
-           reschedule ourselves. */
+           Wait for the read side to close the connection. */
         assert(request && (connection->flags & CONN_READER));
-        if(request->error_code == 0) {
-            request->error_code = 500;
-            request->error_message = internAtom("Error message lost");
+        if(s >= 2) {
+            pokeFdEvent(connection->fd, -EDOSHUTDOWN, POLLIN);
+        } else {
+            pokeFdEvent(connection->fd, -EDOGRACEFUL, POLLIN);
         }
-        httpClientDelayedFinish(connection);
         return;
     }
 
@@ -208,7 +205,6 @@ httpClientFinish(HTTPConnectionPtr connection, int s)
     connection->len = -1;
     connection->offset = 0;
     connection->te = TE_IDENTITY;
-    connection->reqte = TE_UNKNOWN;
 
     if(!s) {
         assert(connection->fd > 0);
@@ -231,14 +227,28 @@ httpClientFinish(HTTPConnectionPtr connection, int s)
         }
         /* The request has already been validated when it first got
            into the queue */
-        if(connection->request)
-            httpClientNoticeRequest(connection->request, 1);
+        if(connection->request) {
+            if(connection->request->object != NULL)
+                httpClientNoticeRequest(connection->request, 1);
+            else
+                assert(connection->flags & CONN_READER);
+        }
         return;
     }
     
     do_log(D_CLIENT_CONN, "Closing client connection 0x%x\n",
            (unsigned)connection);
 
+    if(connection->flags & CONN_READER) {
+        httpSetTimeout(connection, 10);
+        if(connection->fd < 0) return;
+        if(s >= 2) {
+            pokeFdEvent(connection->fd, -EDOSHUTDOWN, POLLIN);
+        } else {
+            pokeFdEvent(connection->fd, -EDOGRACEFUL, POLLIN);
+        }
+        return;
+    }
     while(1) {
         HTTPRequestPtr requestee;
         request = connection->request;
@@ -258,16 +268,6 @@ httpClientFinish(HTTPConnectionPtr connection, int s)
         httpDequeueRequest(connection);
         httpDestroyRequest(request);
     }
-    if(connection->flags & CONN_READER) {
-        httpSetTimeout(connection, 10);
-        if(connection->fd < 0) return;
-        if(s >= 2) {
-            pokeFdEvent(connection->fd, -EDOSHUTDOWN, POLLIN);
-        } else {
-            pokeFdEvent(connection->fd, -EDOGRACEFUL, POLLIN);
-        }
-        return;
-    }
     if(connection->reqbuf) {
         dispose_chunk(connection->reqbuf);
         connection->reqbuf = NULL;
@@ -283,35 +283,6 @@ httpClientFinish(HTTPConnectionPtr connection, int s)
     }
     connection->fd = -1;
     free(connection);
-}
-
-static int
-httpClientDelayedFinishHandler(TimeEventHandlerPtr event)
-{
-    HTTPConnectionPtr connection = *(HTTPConnectionPtr*)event->data;
-    httpClientFinish(connection, 1);
-    return 1;
-}
-
-static void
-httpClientDelayedFinish(HTTPConnectionPtr connection)
-{
-    TimeEventHandlerPtr handler;
-
-    handler = scheduleTimeEvent(1, httpClientDelayedFinishHandler,
-                                sizeof(connection), &connection);
-    if(!handler) {
-        do_log(L_ERROR, 
-               "Couldn't schedule delayed finish -- freeing memory.");
-        free_chunk_arenas();
-        handler = scheduleTimeEvent(1, httpClientDelayedFinishHandler,
-                                    sizeof(connection), &connection);
-        if(!handler) {
-            do_log(L_ERROR, 
-                   "Couldn't schedule delayed finish -- aborting.\n");
-            polipoExit();
-        }
-    }
 }
 
 /* Extremely baroque implementation of close: we need to synchronise
@@ -964,6 +935,7 @@ httpClientDiscardBody(HTTPConnectionPtr connection)
         connection->reqlen = 0;
         connection->reqbegin = 0;
     }
+    connection->reqte = TE_UNKNOWN;
 
     httpSetTimeout(connection, 60);
     /* We need to delay in order to make sure the previous request
@@ -978,9 +950,17 @@ httpClientDiscardBody(HTTPConnectionPtr connection)
     return 1;
 
  fail:
-    connection->flags &= ~CONN_READER;
-    shutdown(connection->fd, 0);
-    httpClientFinish(connection, 1);
+    connection->reqlen = 0;
+    connection->reqbegin = 0;
+    connection->bodylen = 0;
+    connection->reqte = TE_UNKNOWN;
+    shutdown(connection->fd, 2);
+    handler = scheduleTimeEvent(-1, httpClientDelayed,
+                                sizeof(connection), &connection);
+    if(handler == NULL) {
+        do_log(L_ERROR, "Couldn't schedule reading from client.");
+        connection->flags &= ~CONN_READER;
+    }
     return 1;
 }
 
