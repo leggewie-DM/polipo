@@ -32,7 +32,7 @@ static int getNextTokenInList(const char *buf, int i,
 static AtomPtr atomConnection, atomProxyConnection, atomContentLength,
     atomHost, atomAcceptRange, atomTE,
     atomReferer, atomProxyAuthenticate, atomProxyAuthorization,
-    atomKeepAlive, atomTrailers, atomUpgrade, atomDate, atomExpires,
+    atomKeepAlive, atomTrailer, atomUpgrade, atomDate, atomExpires,
     atomIfModifiedSince, atomIfUnmodifiedSince, atomIfRange, atomLastModified,
     atomIfMatch, atomIfNoneMatch, atomAge, atomTransferEncoding, 
     atomETag, atomCacheControl, atomPragma, atomContentRange, atomRange,
@@ -79,7 +79,7 @@ initHttpParser()
     A(atomProxyAuthenticate, "proxy-authenticate");
     A(atomProxyAuthorization, "proxy-authorization");
     A(atomKeepAlive, "keep-alive");
-    A(atomTrailers, "trailers");
+    A(atomTrailer, "trailer");
     A(atomUpgrade, "upgrade");
     A(atomDate, "date");
     A(atomExpires, "expires");
@@ -931,7 +931,7 @@ httpParseHeaders(int client, AtomPtr url,
                 } while(h < 0);
                 hbuf_length = h;
             }
-        } else if(name == atomTrailers || name == atomUpgrade) {
+        } else if(name == atomTrailer || name == atomUpgrade) {
             do_log(L_ERROR, "Trailers or upgrade present.\n");
             goto fail;
         } else if(name == atomDate || name == atomExpires ||
@@ -1178,10 +1178,25 @@ httpParseHeaders(int client, AtomPtr url,
             }
         } else if(name == atomVia) {
             if(via_return) {
-                via = internAtomN(buf + value_start, value_end - value_start);
-                if(via == NULL) {
+                AtomPtr new_via, full_via;
+                new_via =
+                    internAtomN(buf + value_start, value_end - value_start);
+                if(new_via == NULL) {
                     do_log(L_ERROR, "Couldn't allocate via.\n");
                     goto fail;
+                }
+                if(via) {
+                    full_via =
+                        internAtomF("%s, %s", via->string, new_via->string);
+                    releaseAtom(new_via);
+                    if(full_via == NULL) {
+                        do_log(L_ERROR, "Couldn't allocate via");
+                        goto fail;
+                    }
+                    releaseAtom(via);
+                    via = full_via;
+                } else {
+                    via = new_via;
                 }
             }
         } else if(name == atomExpect) {
@@ -1210,8 +1225,8 @@ httpParseHeaders(int client, AtomPtr url,
                     do_log_n(L_VARY,
                              buf + value_start, value_end - value_start);
                     do_log(L_VARY, ").\n");
-                    cache_control.flags |= CACHE_VARY;
                 }
+                cache_control.flags |= CACHE_VARY;
             } else if(name == atomAuthorization) {
                 cache_control.flags |= CACHE_AUTHORIZATION;
             } 

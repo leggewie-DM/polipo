@@ -1001,10 +1001,12 @@ httpServerDoSide(HTTPConnectionPtr connection)
         connection->reqbuf = NULL;
         connection->reqlen = 0;
         pokeFdEvent(connection->fd, -ESHUTDOWN, POLLIN);
-        client->flags |= CONN_SIDE_READER;
-        do_stream(IO_READ | IO_IMMEDIATE,
-                  client->fd, 0, NULL, 0,
-                  httpClientSideHandler, client);
+        if(client->flags & CONN_READER) {
+            client->flags |= CONN_SIDE_READER;
+            do_stream(IO_READ | IO_IMMEDIATE | IO_NOTNOW,
+                      client->fd, 0, NULL, 0,
+                      httpClientSideHandler, client);
+        }
     } else if(!(request->flags & REQUEST_WAIT_CONTINUE) && doflush) {
         /* Make sure there's a reqbuf, as httpServerFinish uses
            it to determine if there's a writer. */
@@ -1929,6 +1931,9 @@ httpServerHandlerHeaders(int eof,
                         internAtom("Couldn't parse server headers"));
         return 1;
     }
+
+    if(date < 0)
+        date = current_time.tv_sec;
 
     if(code == 100) {
         releaseAtom(url);
