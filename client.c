@@ -1129,6 +1129,10 @@ httpClientNoticeRequest(HTTPRequestPtr request, int novalidate)
     else
         validate = 0;
 
+        
+    /* Forget about old failures */
+    request->object->flags &= ~OBJECT_FAILED;
+
     if(request->cache_control.flags & CACHE_ONLY_IF_CACHED) {
         validate = 0;
         if(!haveData) {
