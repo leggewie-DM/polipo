@@ -33,9 +33,12 @@ AtomPtr parentHost = NULL;
 int parentPort = -1;
 int pmmFirstSize = 0, pmmSize = 0;
 int serverSlots = 2;
+int serverSlots1 = 4;
 int serverMaxSlots = 8;
 int dontCacheRedirects = 0;
 int maxSideBuffering = 1500;
+int maxConnectionAge = 1260;
+int maxConnectionRequests = 400;
 
 static HTTPServerPtr servers = 0;
 
@@ -71,6 +74,8 @@ preinitServer(void)
                     "The size of a PMM chunk.");
     CONFIG_VARIABLE(serverSlots, CONFIG_INT,
                     "Maximum number of connections per server.");
+    CONFIG_VARIABLE(serverSlots1, CONFIG_INT,
+                    "Maximum number of connections per HTTP/1.0 server.");
     CONFIG_VARIABLE(serverMaxSlots, CONFIG_INT,
                     "Maximum number of connections per broken server.");
     CONFIG_VARIABLE(dontCacheRedirects, CONFIG_BOOLEAN,
@@ -81,6 +86,12 @@ preinitServer(void)
     CONFIG_VARIABLE_SETTABLE(maxSideBuffering,
                              CONFIG_INT, configIntSetter,
                              "Maximum buffering for PUT and POST requests.");
+    CONFIG_VARIABLE_SETTABLE(maxConnectionAge,
+                             CONFIG_TIME, configIntSetter,
+                             "Maximum age of a server-side connection.");
+    CONFIG_VARIABLE_SETTABLE(maxConnectionRequests,
+                             CONFIG_INT, configIntSetter,
+                             "Maximum number of requests on a server-side connection.");
 }
 
 static int
@@ -212,6 +223,10 @@ initServer(void)
         serverSlots = 1;
     if(serverSlots > serverMaxSlots)
         serverSlots = serverMaxSlots;
+    if(serverSlots1 < serverSlots)
+        serverSlots1 = serverSlots;
+    if(serverSlots1 > serverMaxSlots)
+        serverSlots1 = serverMaxSlots;
 
     initParentProxy();
 
@@ -871,6 +886,7 @@ httpServerTrigger(HTTPServerPtr server)
                 do_log(L_ERROR, "Couldn't register idle handler.\n");
                 httpServerFinish(server->connection[i], 1, 0);
             }
+            httpSetTimeout(server->connection[i], serverIdleTimeout);
         }
     }
 
@@ -1150,6 +1166,10 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
                   !(connection->request->flags & REQUEST_PERSISTENT)))
         s = 1;
 
+    if(connection->serviced >= maxConnectionRequests ||
+       connection->time < current_time.tv_sec - maxConnectionAge)
+        s = 1;
+
     if(connection->reqbuf) {
         /* As most normal requests go out in a single packet, this is
            extremely unlikely to happen.  As for POST/PUT requests,
@@ -1239,7 +1259,7 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
         connection->timeout = NULL;
         httpConnectionDestroyBuf(connection);
         if(connection->fd >= 0)
-            close(connection->fd);
+            CLOSE(connection->fd);
         connection->fd = -1;
         server->persistent -= 1;
         if(server->persistent < -5)
@@ -1281,7 +1301,9 @@ httpServerFinish(HTTPConnectionPtr connection, int s, int offset)
     } else {
         server->persistent += 1;
         if(server->persistent > 0)
-            server->numslots = MIN(server->maxslots, serverSlots);
+            server->numslots = MIN(server->maxslots,
+                                   server->version == HTTP_10 ?
+                                   serverSlots1 : serverSlots);
         httpSetTimeout(connection, serverTimeout);
         /* See httpServerTrigger */
         if(connection->pipelined ||

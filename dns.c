@@ -863,7 +863,7 @@ establishDnsSocket()
 
         rc = connect(dnsSocket, &nameserverAddress, sa_size);
         if(rc < 0) {
-            close(dnsSocket);
+            CLOSE(dnsSocket);
             dnsSocket = -1;
             do_log_error(L_ERROR, errno, "Couldn't create DNS \"connection\"");
             return -errno;
@@ -875,7 +875,7 @@ establishDnsSocket()
             registerFdEvent(dnsSocket, POLLIN, dnsReplyHandler, 0, NULL);
         if(dnsSocketHandler == NULL) {
             do_log(L_ERROR, "Couldn't register DNS socket handler.\n");
-            close(dnsSocket);
+            CLOSE(dnsSocket);
             dnsSocket = -1;
             return -ENOMEM;
         }
@@ -1412,7 +1412,7 @@ dnsBuildQuery(int id, char *buf, int offset, int n, AtomPtr name, int af)
     switch(af) {
     case 4: type = 1; break;
     case 6: type = 28; break;
-    default: return EINVAL;
+    default: return -EINVAL;
     }
 
     if(i + 12 >= n) return -1;
@@ -1437,7 +1437,7 @@ dnsReplyId(char *buf, int offset, int n, int *id_return)
 {
     if(n - offset < 12)
         return -1;
-    *id_return = ntohs(*(short*)&buf[offset]);
+    DO_NTOHS(*id_return, &buf[offset]);
     return 1;
 }
 
@@ -1664,7 +1664,7 @@ do { \
         i += rdlength;
     }
 
-#if (LOGGING & D_DNS)
+#if (LOGGING_MAX & D_DNS)
     for(j = 0; j < nscount; j++) {
         PARSE_ANSWER("ns", nofail);
         i += rdlength;
