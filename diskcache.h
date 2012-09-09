@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003, 2004 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -55,9 +55,12 @@ typedef struct _DiskObject {
 
 struct stat;
 
+extern int maxDiskCacheEntrySize;
+
 void preinitDiskcache(void);
 void initDiskcache(void);
 int destroyDiskEntry(ObjectPtr object, int);
+int diskEntrySize(ObjectPtr object);
 ObjectPtr objectGetFromDisk(ObjectPtr);
 int objectFillFromDisk(ObjectPtr object, int offset, int chunks);
 int writeoutMetadata(ObjectPtr object);
@@ -65,5 +68,5 @@ int writeoutToDisk(ObjectPtr object, int upto, int max);
 void dirtyDiskEntry(ObjectPtr object);
 int revalidateDiskEntry(ObjectPtr object);
 DiskObjectPtr readDiskObject(char *filename, struct stat *sb);
-void indexDiskObjects(const char *root, int r);
+void indexDiskObjects(FILE *out, const char *root, int r);
 void expireDiskObjects(void);

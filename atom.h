@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,7 @@ AtomPtr internAtom(const char *string);
 AtomPtr internAtomN(const char *string, int n);
 AtomPtr internAtomLowerN(const char *string, int n);
 AtomPtr atomCat(AtomPtr atom, const char *string);
+int atomSplit(AtomPtr atom, char c, AtomPtr *return1, AtomPtr *return2);
 AtomPtr retainAtom(AtomPtr atom);
 void releaseAtom(AtomPtr atom);
 AtomPtr internAtomError(int e, const char *f, ...)
@@ -49,7 +50,8 @@ AtomPtr internAtomError(int e, const char *f, ...)
 AtomPtr internAtomF(const char *format, ...)
      ATTRIBUTE ((format (printf, 1, 2)));
 char *atomString(AtomPtr) ATTRIBUTE ((pure));
-AtomListPtr makeAtomList(AtomPtr*, int);
-void destroyAtomList(AtomListPtr);
-int atomListMember(AtomPtr, AtomListPtr);
-void atomListCons(AtomPtr, AtomListPtr);
+AtomListPtr makeAtomList(AtomPtr *atoms, int n);
+void destroyAtomList(AtomListPtr list);
+int atomListMember(AtomPtr atom, AtomListPtr list)
+    ATTRIBUTE ((pure));
+void atomListCons(AtomPtr atom, AtomListPtr list);

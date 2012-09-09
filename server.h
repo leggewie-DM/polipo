@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-extern int serverExpireTime;
+extern int serverExpireTime, dontCacheRedirects;
 
 typedef struct _HTTPServer {
     char *name;
@@ -41,6 +41,9 @@ typedef struct _HTTPServer {
     HTTPRequestPtr request, request_last;
     struct _HTTPServer *next;
 } HTTPServerRec, *HTTPServerPtr;
+
+extern AtomPtr parentHost;
+extern int parentPort;
 
 void preinitServer(void);
 void initServer(void);
@@ -64,6 +67,9 @@ int httpServerConnectionDnsHandler(int status,
 int httpServerConnectionHandler(int status,
                                 FdEventHandlerPtr event,
                                 ConnectRequestPtr request);
+int httpServerSocksHandler(int status, SocksRequestPtr request);
+int httpServerConnectionHandlerCommon(int status,
+                                      HTTPConnectionPtr connection);
 void httpServerFinish(HTTPConnectionPtr connection, int s, int offset);
 
 void httpServerReply(HTTPConnectionPtr connection, int immediate);
@@ -104,4 +110,4 @@ int connectionAddData(HTTPConnectionPtr connection, int skip);
 int 
 httpWriteRequest(HTTPConnectionPtr connection, HTTPRequestPtr request, int);
 
-void listServers(void);
+void listServers(FILE*);

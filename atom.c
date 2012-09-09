@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003, 2004 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -72,7 +72,8 @@ internAtomN(const char *string, int n)
         atomHashTable[h] = atom;
         used_atoms++;
     }
-    do_log(D_ATOM_REFCOUNT, "A 0x%x %d++\n", (unsigned)atom, atom->refcount);
+    do_log(D_ATOM_REFCOUNT, "A 0x%lx %d++\n",
+           (unsigned long)atom, atom->refcount);
     atom->refcount++;
     return atom;
 }
@@ -100,6 +101,27 @@ atomCat(AtomPtr atom, const char *string)
     newAtom = internAtomN(s, atom->length + n);
     if(s != buf) free(s);
     return newAtom;
+}
+
+int
+atomSplit(AtomPtr atom, char c, AtomPtr *return1, AtomPtr *return2)
+{
+    char *p;
+    AtomPtr atom1, atom2;
+    p = memchr(atom->string, c, atom->length);
+    if(p == NULL)
+        return 0;
+    atom1 = internAtomN(atom->string, p - atom->string);
+    if(atom1 == NULL)
+        return -ENOMEM;
+    atom2 = internAtomN(p + 1, atom->length - (p + 1 - atom->string));
+    if(atom2 == NULL) {
+        releaseAtom(atom1);
+        return -ENOMEM;
+    }
+    *return1 = atom1;
+    *return2 = atom2;
+    return 1;
 }
 
 AtomPtr
@@ -132,7 +154,8 @@ retainAtom(AtomPtr atom)
     if(atom == NULL)
         return NULL;
 
-    do_log(D_ATOM_REFCOUNT, "A 0x%x %d++\n", (unsigned)atom, atom->refcount);
+    do_log(D_ATOM_REFCOUNT, "A 0x%lx %d++\n",
+           (unsigned long)atom, atom->refcount);
     assert(atom->refcount >= 1 && atom->refcount < 50000);
     atom->refcount++;
     return atom;
@@ -144,7 +167,8 @@ releaseAtom(AtomPtr atom)
     if(atom == NULL)
         return;
 
-    do_log(D_ATOM_REFCOUNT, "A 0x%x %d--\n", (unsigned)atom, atom->refcount);
+    do_log(D_ATOM_REFCOUNT, "A 0x%lx %d--\n",
+           (unsigned long)atom, atom->refcount);
     assert(atom->refcount >= 1 && atom->refcount < 50000);
 
     atom->refcount--;
@@ -206,20 +230,27 @@ internAtomErrorV(int e, const char *f, va_list args)
     char *s1, *s2;
     int n, rc;
 
-    s1 = vsprintf_a(f, args);
-    if(s1 == NULL)
-        return NULL;
-    n = strlen(s1);
+    if(f) {
+        s1 = vsprintf_a(f, args);
+        if(s1 == NULL)
+            return NULL;
+        n = strlen(s1);
+    } else {
+        s1 = NULL;
+        n = 0;
+    }
 
     s2 = malloc(n + 70);
     if(s2 == NULL) {
         free(s1);
         return NULL;
     }
-    strcpy(s2, s1);
-    free(s1);
+    if(s1) {
+        strcpy(s2, s1);
+        free(s1);
+    }
 
-    rc = snprintf(s2 + n, 69, ": %s (%d)", es, e);
+    rc = snprintf(s2 + n, 69, f ? ": %s" : "%s", es);
     if(rc < 0 || rc >= 69) {
         free(s2);
         return NULL;

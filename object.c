@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -33,10 +33,8 @@ int objectExpiryScheduled;
 
 int publicObjectCount;
 int privateObjectCount;
-int cacheIsShared = 0;
+int cacheIsShared = 1;
 int publicObjectLowMark = 0, objectHighMark = 2048;
-
-static int in_notifyObject = 0;
 
 static ObjectPtr *objectHashTable;
 int maxExpiresAge = (30 * 24 + 1) * 3600;
@@ -45,35 +43,40 @@ float maxAgeFraction = 0.1;
 int maxNoModifiedAge = 23 * 60;
 int maxWriteoutWhenIdle = 64 * 1024;
 int maxObjectsWhenIdle = 32;
-int idleTime = 30;
+int idleTime = 20;
+int dontCacheCookies = 0;
 
 void
 preinitObject()
 {
-    CONFIG_VARIABLE(idleTime, CONFIG_TIME,
-                    "Time to remain idle before writing out.");
-    CONFIG_VARIABLE(maxWriteoutWhenIdle, CONFIG_INT,
-                    "Amount of data to write at a time when idle.");
-    CONFIG_VARIABLE(maxObjectsWhenIdle, CONFIG_INT,
-                    "Number of objects to write at a time when idle.");
-    CONFIG_VARIABLE(cacheIsShared, CONFIG_BOOLEAN,
-                    "If false, ignore s-maxage and private.");
-    CONFIG_VARIABLE(mindlesslyCacheVary, CONFIG_BOOLEAN,
-                    "If true, mindlessly cache negotiated objects.");
+    CONFIG_VARIABLE_SETTABLE(idleTime, CONFIG_TIME, configIntSetter,
+                             "Time to remain idle before writing out.");
+    CONFIG_VARIABLE_SETTABLE(maxWriteoutWhenIdle, CONFIG_INT, configIntSetter,
+                             "Amount of data to write at a time when idle.");
+    CONFIG_VARIABLE_SETTABLE(maxObjectsWhenIdle, CONFIG_INT, configIntSetter,
+                             "Number of objects to write at a time "
+                             "when idle.");
+    CONFIG_VARIABLE_SETTABLE(cacheIsShared, CONFIG_BOOLEAN, configIntSetter,
+                             "If false, ignore s-maxage and private.");
+    CONFIG_VARIABLE_SETTABLE(mindlesslyCacheVary, CONFIG_BOOLEAN,
+                             configIntSetter,
+                             "If true, mindlessly cache negotiated objects.");
     CONFIG_VARIABLE(objectHashTableSize, CONFIG_INT,
                     "Size of the object hash table (0 = auto).");
     CONFIG_VARIABLE(objectHighMark, CONFIG_INT,
                     "High object count mark.");
     CONFIG_VARIABLE(publicObjectLowMark, CONFIG_INT,
                     "Low object count mark (0 = auto).");
-    CONFIG_VARIABLE(maxExpiresAge, CONFIG_TIME,
-                    "Max age for objects with Expires header.");
-    CONFIG_VARIABLE(maxAge, CONFIG_TIME,
-                    "Max age for objects without Expires header.");
-    CONFIG_VARIABLE(maxAgeFraction, CONFIG_FLOAT,
-                    "Fresh fraction of modification time.");
-    CONFIG_VARIABLE(maxNoModifiedAge, CONFIG_TIME,
-                    "Max age for objects without Last-modified.");
+    CONFIG_VARIABLE_SETTABLE(maxExpiresAge, CONFIG_TIME, configIntSetter,
+                             "Max age for objects with Expires header.");
+    CONFIG_VARIABLE_SETTABLE(maxAge, CONFIG_TIME, configIntSetter,
+                             "Max age for objects without Expires header.");
+    CONFIG_VARIABLE_SETTABLE(maxAgeFraction, CONFIG_FLOAT, configFloatSetter,
+                             "Fresh fraction of modification time.");
+    CONFIG_VARIABLE_SETTABLE(maxNoModifiedAge, CONFIG_TIME, configIntSetter,
+                             "Max age for objects without Last-modified.");
+    CONFIG_VARIABLE_SETTABLE(dontCacheCookies, CONFIG_BOOLEAN, configIntSetter,
+                             "Work around cachable cookies.");
 }
 
 void
@@ -120,7 +123,7 @@ initObject()
 }
 
 ObjectPtr
-findObject(int type, void *key, int key_size)
+findObject(int type, const void *key, int key_size)
 {
     int h;
     ObjectPtr object;
@@ -154,7 +157,7 @@ findObject(int type, void *key, int key_size)
 }
 
 ObjectPtr
-makeObject(int type, void *key, int key_size, int public, int fromdisk,
+makeObject(int type, const void *key, int key_size, int public, int fromdisk,
            RequestFunction request, void* request_closure)
 {
     ObjectPtr object;
@@ -224,7 +227,7 @@ makeObject(int type, void *key, int key_size, int public, int fromdisk,
     object->abort_data = NULL;
     object->code = 0;
     object->message = NULL;
-    object->handlers = NULL;
+    initCondition(&object->condition);
     object->headers = NULL;
     object->via = NULL;
     object->numchunks = 0;
@@ -268,7 +271,8 @@ objectMetadataChanged(ObjectPtr object, int revalidate)
 ObjectPtr
 retainObject(ObjectPtr object)
 {
-    do_log(D_REFCOUNT, "O 0x%x %d++\n", (unsigned)object, object->refcount);
+    do_log(D_REFCOUNT, "O 0x%lx %d++\n",
+           (unsigned long)object, object->refcount);
     object->refcount++;
     return object;
 }
@@ -276,10 +280,12 @@ retainObject(ObjectPtr object)
 void
 releaseObject(ObjectPtr object)
 {
-    do_log(D_REFCOUNT, "O 0x%x %d--\n", (unsigned)object, object->refcount);
+    do_log(D_REFCOUNT, "O 0x%lx %d--\n",
+           (unsigned long)object, object->refcount);
     object->refcount--;
     if(object->refcount == 0) {
-        assert(!object->handlers && !(object->flags & OBJECT_INPROGRESS));
+        assert(!object->condition.handlers && 
+               !(object->flags & OBJECT_INPROGRESS));
         if(!(object->flags & OBJECT_PUBLIC))
             destroyObject(object);
     }
@@ -288,12 +294,14 @@ releaseObject(ObjectPtr object)
 void
 releaseNotifyObject(ObjectPtr object)
 {
-    do_log(D_REFCOUNT, "O 0x%x %d--\n", (unsigned)object, object->refcount);
+    do_log(D_REFCOUNT, "O 0x%lx %d--\n",
+           (unsigned long)object, object->refcount);
     object->refcount--;
     if(object->refcount > 0) {
         notifyObject(object);
     } else {
-        assert(!object->handlers && !(object->flags & OBJECT_INPROGRESS));
+        assert(!object->condition.handlers && 
+               !(object->flags & OBJECT_INPROGRESS));
         if(!(object->flags & OBJECT_PUBLIC))
             destroyObject(object);
     }
@@ -302,7 +310,7 @@ releaseNotifyObject(ObjectPtr object)
 void 
 lockChunk(ObjectPtr object, int i)
 {
-    do_log(D_LOCK, "Lock 0x%x[%d]: ", (unsigned)object, i);
+    do_log(D_LOCK, "Lock 0x%lx[%d]: ", (unsigned long)object, i);
     assert(i >= 0);
     if(i >= object->numchunks)
         objectSetChunks(object, i + 1);
@@ -313,7 +321,7 @@ lockChunk(ObjectPtr object, int i)
 void 
 unlockChunk(ObjectPtr object, int i)
 {
-    do_log(D_LOCK, "Unlock 0x%x[%d]: ", (unsigned)object, i);
+    do_log(D_LOCK, "Unlock 0x%lx[%d]: ", (unsigned long)object, i);
     assert(i >= 0 && i < object->numchunks);
     assert(object->chunks[i].locked > 0);
     object->chunks[i].locked--;
@@ -379,7 +387,7 @@ objectPartial(ObjectPtr object, int length, struct _Atom *headers)
 }
 
 static int
-objectAddChunk(ObjectPtr object, char *data, int offset, int plen)
+objectAddChunk(ObjectPtr object, const char *data, int offset, int plen)
 {
     int i = offset / CHUNK_SIZE;
     int rc;
@@ -419,7 +427,7 @@ objectAddChunk(ObjectPtr object, char *data, int offset, int plen)
 }
 
 static int
-objectAddChunkEnd(ObjectPtr object, char *data, int offset, int plen)
+objectAddChunkEnd(ObjectPtr object, const char *data, int offset, int plen)
 {
     int i = offset / CHUNK_SIZE;
     int rc;
@@ -463,12 +471,12 @@ objectAddChunkEnd(ObjectPtr object, char *data, int offset, int plen)
 }
 
 int
-objectAddData(ObjectPtr object, char *data, int offset, int len)
+objectAddData(ObjectPtr object, const char *data, int offset, int len)
 {
     int rc;
 
-    do_log(D_OBJECT_DATA, "Adding data to 0x%x (%d) at %d: %d bytes\n",
-           (unsigned)object, object->length, offset, len);
+    do_log(D_OBJECT_DATA, "Adding data to 0x%lx (%d) at %d: %d bytes\n",
+           (unsigned long)object, object->length, offset, len);
 
     if(len == 0)
         return 1;
@@ -519,7 +527,7 @@ objectAddData(ObjectPtr object, char *data, int offset, int len)
 }
 
 void
-objectPrintf(ObjectPtr object, int offset, char *format, ...)
+objectPrintf(ObjectPtr object, int offset, const char *format, ...)
 {
     char *buf;
     int rc;
@@ -568,8 +576,54 @@ objectHoleSize(ObjectPtr object, int offset)
     return size;
 }
 
-    
-        
+
+/* Returns 2 if the data is wholly in memory, 1 if it's available on disk */
+int
+objectHasData(ObjectPtr object, int from, int to)
+{
+    int first = from / CHUNK_SIZE;
+    int last = to / CHUNK_SIZE;
+    int i, upto;
+
+    if(to < 0) {
+        if(object->length >= 0)
+            to = object->length;
+        else
+            return 0;
+    }
+
+    if(from >= to)
+        return 2;
+
+    if(to > object->size) {
+        upto = to;
+        goto disk;
+    }
+
+    if(last > object->numchunks ||
+       object->chunks[last].size > to % CHUNK_SIZE) {
+        upto = to;
+        goto disk;
+    }
+
+    for(i = last - 1; i >= first; i--) {
+        if(object->chunks[i].size < CHUNK_SIZE) {
+            upto = (i + 1) * CHUNK_SIZE;
+            goto disk;
+        }
+    }
+
+    return 2;
+
+ disk:
+    if(object->flags & OBJECT_DISK_ENTRY_COMPLETE)
+        return 1;
+
+    if(diskEntrySize(object) >= upto)
+        return 1;
+
+    return 0;
+}
 
 void
 destroyObject(ObjectPtr object)
@@ -577,7 +631,8 @@ destroyObject(ObjectPtr object)
     int i;
 
     assert(object->refcount == 0 && !object->requestor);
-    assert(!object->handlers && (object->flags & OBJECT_INPROGRESS) == 0);
+    assert(!object->condition.handlers && 
+           (object->flags & OBJECT_INPROGRESS) == 0);
 
     if(object->disk_entry)
         destroyDiskEntry(object, 0);
@@ -655,64 +710,6 @@ privatiseObject(ObjectPtr object, int linear)
     }
 }
 
-ObjectHandlerPtr 
-registerObjectHandler(ObjectPtr object,
-                      int (*handler)(int, ObjectHandlerPtr),
-                      int dsize, void *data)
-{
-    ObjectHandlerPtr ohandler;
-
-    assert(!in_notifyObject);
-
-    assert(object->refcount > 0);
-
-    ohandler = malloc(sizeof(ObjectHandlerRec) - 1 + dsize);
-    if(!ohandler)
-        return NULL;
-
-    ohandler->handler = handler;
-    ohandler->object = object;
-    /* Let the compiler optimise the common case */
-    if(dsize == sizeof(void*))
-        memcpy(ohandler->data, data, sizeof(void*));
-    else if(dsize > 0)
-        memcpy(ohandler->data, data, dsize);
-
-    if(object->handlers)
-        object->handlers->previous = ohandler;
-    ohandler->next = object->handlers;
-    ohandler->previous = NULL;
-    object->handlers = ohandler;
-    return ohandler;
-}
-
-void
-unregisterObjectHandler(ObjectHandlerPtr handler)
-{
-    ObjectPtr object = handler->object;
-
-    assert(!in_notifyObject);
-    assert(object->refcount > 0);
-
-    if(object->handlers == handler)
-        object->handlers = object->handlers->next;
-    if(handler->next)
-        handler->next->previous = handler->previous;
-    if(handler->previous)
-        handler->previous->next = handler->next;
-
-    free(handler);
-}
-
-void 
-abortObjectHandler(ObjectHandlerPtr handler)
-{
-    int done;
-    done = handler->handler(-1, handler);
-    assert(done);
-    unregisterObjectHandler(handler);
-}
-
 void
 abortObject(ObjectPtr object, int code, AtomPtr message)
 {
@@ -758,34 +755,9 @@ supersedeObject(ObjectPtr object)
 void
 notifyObject(ObjectPtr object) 
 {
-    ObjectHandlerPtr handler;
-    int done;
-
-    assert(!in_notifyObject);
-    in_notifyObject++;
-
     retainObject(object);
-
-    handler = object->handlers;
-    while(handler) {
-        ObjectHandlerPtr next = handler->next;
-        done = handler->handler(0, handler);
-        if(done) {
-            if(handler == object->handlers)
-                object->handlers = next;
-            if(next)
-                next->previous = handler->previous;
-            if(handler->previous)
-                handler->previous->next = next;
-            else
-                object->handlers = next;
-            free(handler);
-        }
-        handler = next;
-    }
-
+    signalCondition(&object->condition);
     releaseObject(object);
-    in_notifyObject--;
 }
 
 int
@@ -940,7 +912,7 @@ discardObjects(int all, int force)
     return 1;
 }
 
-CacheControlRec no_cache_control = {0, -1, -1, 0, 0};
+CacheControlRec no_cache_control = {0, -1, -1, -1, -1};
 
 int
 objectIsStale(ObjectPtr object, CacheControlPtr cache_control)
@@ -948,9 +920,17 @@ objectIsStale(ObjectPtr object, CacheControlPtr cache_control)
     int stale = 0x7FFFFFFF;
     int flags;
     int max_age, s_maxage;
+    time_t date;
 
     if(object->flags & OBJECT_INITIAL)
         return 0;
+
+    if(object->date >= 0)
+        date = object->date;
+    else if(object->age >= 0)
+        date = object->age;
+    else
+        date = current_time.tv_sec;
 
     if(cache_control == NULL)
         cache_control = &no_cache_control;
@@ -978,32 +958,41 @@ objectIsStale(ObjectPtr object, CacheControlPtr cache_control)
     if(cacheIsShared && s_maxage >= 0)
         stale = MIN(stale, object->age + s_maxage);
 
-    /* RFC 2616 14.9.3 */
+    if(object->expires >= 0 || object->max_age >= 0)
+        stale = MIN(stale, object->age + maxExpiresAge);
+    else
+        stale = MIN(stale, object->age + maxAge);
+
+    /* RFC 2616 14.9.3: server-side max-age overrides expires */
 
     if(object->expires >= 0 && object->max_age < 0) {
-        stale = MIN(stale, object->age + maxExpiresAge);
-        if(object->date >= 0) {
-            /* This protects against clock skew */
-            stale = MIN(stale, object->expires - object->date + object->age);
-        } else {
-            stale = MIN(stale, object->expires);
-        }
+        /* This protects against clock skew */
+        stale = MIN(stale, object->age + object->expires - date);
     }
 
-    stale = MIN(stale, object->age + maxAge);
-
-    if(object->last_modified >= 0)
-        stale = MIN(stale,
-                    object->age +
-                    (current_time.tv_sec -
-                     object->last_modified) * maxAgeFraction);
-    else
-        stale = MIN(stale, object->age + maxNoModifiedAge);
+    if(object->expires < 0 && object->max_age < 0) {
+        /* No server-side information -- heuristic expiration */
+        if(object->last_modified >= 0)
+            /* Again, take care of clock skew */
+            stale = MIN(stale,
+                        object->age +
+                        (date - object->last_modified) * maxAgeFraction);
+        else
+            stale = MIN(stale, object->age + maxNoModifiedAge);
+    }
 
     if(!(flags & CACHE_MUST_REVALIDATE) &&
        !(cacheIsShared && (flags & CACHE_PROXY_REVALIDATE))) {
-        stale = MIN(stale - cache_control->min_fresh,
-                    stale + cache_control->max_stale);
+        /* Client side can relax transparency */
+        if(cache_control->min_fresh >= 0) {
+            if(cache_control->max_stale >= 0)
+                stale = MIN(stale - cache_control->min_fresh,
+                            stale + cache_control->max_stale);
+            else
+                stale = stale - cache_control->min_fresh;
+        } else if(cache_control->max_stale >= 0) {
+            stale = stale + cache_control->max_stale;
+        }
     }
 
     return current_time.tv_sec > stale;
@@ -1028,6 +1017,9 @@ objectMustRevalidate(ObjectPtr object, CacheControlPtr cache_control)
         return 1;
 
     if(!mindlesslyCacheVary && (flags & CACHE_VARY))
+        return 1;
+
+    if(dontCacheCookies && (flags & CACHE_COOKIE))
         return 1;
 
     if(object)

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -60,6 +60,7 @@ main(int argc, char **argv)
     preinitDiskcache();
     preinitLocal();
     preinitForbidden();
+    preinitSocks();
 
     i = 1;
     while(i < argc) {
@@ -119,7 +120,7 @@ main(int argc, char **argv)
         exit(1);
 
     while(i < argc) {
-        rc = parseConfigLine(argv[i], "command line", 0);
+        rc = parseConfigLine(argv[i], "command line", 0, 0);
         if(rc < 0)
             exit(1);
         i++;
@@ -136,6 +137,7 @@ main(int argc, char **argv)
     initServer();
     initDiskcache();
     initForbidden();
+    initSocks();
 
     if(printConfig) {
         printConfigVariables(stdout, 0);
@@ -164,10 +166,4 @@ main(int argc, char **argv)
 
     if(pidFile) unlink(pidFile->string);
     return 0;
-}
-
-void
-reconfigure()
-{
-    initForbidden();
 }

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,12 @@ THE SOFTWARE.
 
 #include "polipo.h"
 
+#ifdef HAVE_FORK
 static volatile sig_atomic_t exitFlag = 0;
+#else
+static int exitFlag = 0;
+#endif
+static int in_signalCondition = 0;
 
 static TimeEventHandlerPtr timeEventQueue;
 static TimeEventHandlerPtr timeEventQueueLast;
@@ -54,7 +59,8 @@ timeval_cmp(struct timeval *t1, struct timeval *t2)
 }
 
 static inline void
-timeval_minus(struct timeval *d, struct timeval *s1, struct timeval *s2)
+timeval_minus(struct timeval *d,
+              const struct timeval *s1, const struct timeval *s2)
 {
     if(s1->tv_usec > s2->tv_usec) {
         d->tv_usec = s1->tv_usec - s2->tv_usec;
@@ -66,11 +72,12 @@ timeval_minus(struct timeval *d, struct timeval *s1, struct timeval *s2)
 }
 
 int
-timeval_minus_usec(struct timeval *s1, struct timeval *s2)
+timeval_minus_usec(const struct timeval *s1, const struct timeval *s2)
 {
     return (s1->tv_sec - s2->tv_sec) * 1000000 + s1->tv_usec - s2->tv_usec;
 }
 
+#ifdef HAVE_FORK
 static void
 sigexit(int signo)
 {
@@ -81,10 +88,12 @@ sigexit(int signo)
     else
         exitFlag = 3;
 }
+#endif
 
 void
 initEvents()
 {
+#ifdef HAVE_FORK
     struct sigaction sa;
     sigset_t ss;
 
@@ -123,6 +132,7 @@ initEvents()
     sa.sa_mask = ss;
     sa.sa_flags = 0;
     sigaction(SIGUSR2, &sa, NULL);
+#endif
 
     timeEventQueue = NULL;
     timeEventQueueLast = NULL;
@@ -136,6 +146,7 @@ initEvents()
 void
 uninitEvents(void)
 {
+#ifdef HAVE_FORK
     struct sigaction sa;
     sigset_t ss;
 
@@ -168,8 +179,10 @@ uninitEvents(void)
     sa.sa_mask = ss;
     sa.sa_flags = 0;
     sigaction(SIGUSR2, &sa, NULL);
+#endif
 }
 
+#ifdef HAVE_FORK
 void
 interestingSignals(sigset_t *ss)
 {
@@ -180,6 +193,7 @@ interestingSignals(sigset_t *ss)
     sigaddset(ss, SIGUSR1);
     sigaddset(ss, SIGUSR2);
 }
+#endif
 
 void
 timeToSleep(struct timeval *time)
@@ -628,7 +642,7 @@ eventLoop()
             } else {
                 writeoutObjects(1);
             }
-            reconfigure();
+            initForbidden();
             exitFlag = 0;
         }
 
@@ -710,6 +724,107 @@ eventLoop()
             }
         }
     }
+}
+
+void
+initCondition(ConditionPtr condition)
+{
+    condition->handlers = NULL;
+}
+
+ConditionPtr
+makeCondition(void)
+{
+    ConditionPtr condition;
+    condition = malloc(sizeof(ConditionRec));
+    if(condition == NULL)
+        return NULL;
+    initCondition(condition);
+    return condition;
+}
+
+ConditionHandlerPtr
+conditionWait(ConditionPtr condition,
+              int (*handler)(int, ConditionHandlerPtr),
+              int dsize, void *data)
+{
+    ConditionHandlerPtr chandler;
+
+    assert(!in_signalCondition);
+
+    chandler = malloc(sizeof(ConditionHandlerRec) - 1 + dsize);
+    if(!chandler)
+        return NULL;
+
+    chandler->condition = condition;
+    chandler->handler = handler;
+    /* Let the compiler optimise the common case */
+    if(dsize == sizeof(void*))
+        memcpy(chandler->data, data, sizeof(void*));
+    else if(dsize > 0)
+        memcpy(chandler->data, data, dsize);
+
+    if(condition->handlers)
+        condition->handlers->previous = chandler;
+    chandler->next = condition->handlers;
+    chandler->previous = NULL;
+    condition->handlers = chandler;
+    return chandler;
+}
+
+void
+unregisterConditionHandler(ConditionHandlerPtr handler)
+{
+    ConditionPtr condition = handler->condition;
+
+    assert(!in_signalCondition);
+
+    if(condition->handlers == handler)
+        condition->handlers = condition->handlers->next;
+    if(handler->next)
+        handler->next->previous = handler->previous;
+    if(handler->previous)
+        handler->previous->next = handler->next;
+
+    free(handler);
+}
+
+void 
+abortConditionHandler(ConditionHandlerPtr handler)
+{
+    int done;
+    done = handler->handler(-1, handler);
+    assert(done);
+    unregisterConditionHandler(handler);
+}
+
+void
+signalCondition(ConditionPtr condition)
+{
+    ConditionHandlerPtr handler;
+    int done;
+
+    assert(!in_signalCondition);
+    in_signalCondition++;
+
+    handler = condition->handlers;
+    while(handler) {
+        ConditionHandlerPtr next = handler->next;
+        done = handler->handler(0, handler);
+        if(done) {
+            if(handler == condition->handlers)
+                condition->handlers = next;
+            if(next)
+                next->previous = handler->previous;
+            if(handler->previous)
+                handler->previous->next = next;
+            else
+                condition->handlers = next;
+            free(handler);
+        }
+        handler = next;
+    }
+    in_signalCondition--;
 }
 
 void

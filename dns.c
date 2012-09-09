@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003, 2004 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -74,6 +74,8 @@ union {
 } nameserverAddress_storage;
 
 #ifndef NO_FANCY_RESOLVER
+static AtomPtr atomLocalhost, atomLocalhostDot;
+
 #define nameserverAddress nameserverAddress_storage.sa
 
 static DnsQueryPtr inFlightDnsQueries;
@@ -95,7 +97,7 @@ static int dnsDecodeReply(char *buf, int offset, int n,
                           int *id_return,
                           AtomPtr *name_return, AtomPtr *value_return,
                           int *af_return, unsigned *ttl_return);
-static int dnsHandler(int status, ObjectHandlerPtr ohandler);
+static int dnsHandler(int status, ConditionHandlerPtr chandler);
 static int dnsGethostbynameFallback(int id, AtomPtr message);
 static int sendQuery(DnsQueryPtr query);
 
@@ -229,6 +231,8 @@ initDns()
     struct sockaddr_in6 *sin6 = (struct sockaddr_in6*)&nameserverAddress;
 #endif
 
+    atomLocalhost = internAtom("localhost");
+    atomLocalhostDot = internAtom("localhost.");
     inFlightDnsQueries = NULL;
     inFlightDnsQueriesLast = NULL;
 
@@ -302,6 +306,12 @@ do_gethostbyname(char *origname,
     }
 
     request.name = name;
+    request.addr = NULL;
+    request.error_message = NULL;
+    request.count = count;
+    request.object = NULL;
+    request.handler = handler;
+    request.data = data;
 
     object = findObject(OBJECT_DNS, name->string, name->length);
     if(object == NULL || objectMustRevalidate(object, NULL)) {
@@ -339,11 +349,12 @@ do_gethostbyname(char *origname,
 
 #ifndef NO_FANCY_RESOLVER    
     if(object->flags & OBJECT_INITIAL) {
-        ObjectHandlerPtr ohandler;
+        ConditionHandlerPtr chandler;
         assert(object->flags & OBJECT_INPROGRESS);
-        ohandler = registerObjectHandler(object, dnsHandler,
-                                         sizeof(request), &request);
-        if(ohandler == NULL) {
+        request.object = object;
+        chandler = conditionWait(&object->condition, dnsHandler,
+                                 sizeof(request), &request);
+        if(chandler == NULL) {
             rc = ENOMEM;
             goto fail;
         }
@@ -719,10 +730,10 @@ static int dnsSocket = -1;
 static FdEventHandlerPtr dnsSocketHandler = NULL;
 
 static int
-dnsHandler(int status, ObjectHandlerPtr ohandler)
+dnsHandler(int status, ConditionHandlerPtr chandler)
 {
-    ObjectPtr object = ohandler->object;
-    GethostbynameRequestRec request = *(GethostbynameRequestPtr)ohandler->data;
+    GethostbynameRequestRec request = *(GethostbynameRequestPtr)chandler->data;
+    ObjectPtr object = request.object;
 
     assert(!(object->flags & OBJECT_INPROGRESS));
 
@@ -734,7 +745,7 @@ dnsHandler(int status, ObjectHandlerPtr ohandler)
             request.error_message = retainAtom(object->message);
         dnsDelayedNotify(1, &request);
     }
-    releaseObject(ohandler->object);
+    releaseObject(object);
     return 1;
 }
 
@@ -910,7 +921,7 @@ sendQuery(DnsQueryPtr query)
         rc = send(dnsSocket, buf, buflen, 0);
         if(rc < buflen) {
             if(rc >= 0) {
-                do_log(L_ERROR, "Couldn't send DNS query: partial send");
+                do_log(L_ERROR, "Couldn't send DNS query: partial send.\n");
                 return -EAGAIN;
             } else {
                 do_log_error(L_ERROR, errno, "Couldn't send DNS query");
@@ -929,6 +940,27 @@ really_do_dns(AtomPtr name, ObjectPtr object)
     AtomPtr message = NULL;
     int id;
     AtomPtr a = NULL;
+
+    if(a == NULL) {
+        if(name == atomLocalhost || name == atomLocalhostDot) {
+            char s[1 + sizeof(HostAddressRec)];
+            memset(s, 0, sizeof(s));
+            s[0] = DNS_A;
+            s[1] = 4;
+            s[2] = 127;
+            s[3] = 0;
+            s[4] = 0;
+            s[5] = 1;
+            a = internAtomN(s, 1 + sizeof(HostAddressRec));
+            if(a == NULL) {
+                abortObject(object, 501,
+                            internAtom("Couldn't allocate address"));
+                notifyObject(object);
+                errno = ENOMEM;
+                return -1;
+            }
+        }
+    }
 
     if(a == NULL) {
         struct in_addr ina;
@@ -1038,7 +1070,7 @@ dnsReplyHandler(int abort, FdEventHandlerPtr event)
     char buf[2048];
     int len, rc;
     ObjectPtr object;
-    unsigned ttl;
+    unsigned ttl = 0;
     AtomPtr name, value, message = NULL;
     int id;
     int af;
@@ -1086,7 +1118,7 @@ dnsReplyHandler(int abort, FdEventHandlerPtr event)
            reply that we could not understand.  What about truncated
            replies? */
         if(rc < 0) {
-            do_log_error(L_WARN, -rc, "DNS: reply failure");
+            do_log_error(L_WARN, -rc, "DNS");
             if(dnsUseGethostbyname >= 2 ||
                (dnsUseGethostbyname && 
                 (rc != -EDNS_HOST_NOT_FOUND && rc != -EDNS_NO_RECOVERY &&
@@ -1094,7 +1126,7 @@ dnsReplyHandler(int abort, FdEventHandlerPtr event)
                 dnsGethostbynameFallback(id, message);
                 return 0;
             } else {
-                message = internAtomError(-rc, "DNS reply failure");
+                message = internAtomError(-rc, NULL);
             }
         } else {
             assert(name != NULL && id >= 0 && af >= 0);

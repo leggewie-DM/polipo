@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -153,9 +153,9 @@ int lingeringClose(int fd);
 typedef struct _NetAddress {
     int prefix;
     int af;
-    char data[16];
+    unsigned char data[16];
 } NetAddressRec, *NetAddressPtr;
 
 NetAddressPtr parseNetAddress(AtomListPtr list);
-int netAddressMatch(int fd, NetAddressPtr list);
+int netAddressMatch(int fd, NetAddressPtr list) ATTRIBUTE ((pure));
 

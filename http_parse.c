@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003, 2004 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -36,9 +36,12 @@ static AtomPtr atomConnection, atomProxyConnection, atomContentLength,
     atomIfModifiedSince, atomIfUnmodifiedSince, atomIfRange, atomLastModified,
     atomIfMatch, atomIfNoneMatch, atomAge, atomTransferEncoding, 
     atomETag, atomCacheControl, atomPragma, atomContentRange, atomRange,
-    atomVia, atomContentType, atomVary, atomExpect, atomAuthorization,
+    atomVia, atomVary, atomExpect, atomAuthorization,
+    atomSetCookie, atomCookie, atomCookie2,
     atomXPolipoDate, atomXPolipoAccess, atomXPolipoLocation, 
     atomXPolipoBodyOffset;
+
+AtomPtr atomContentType, atomContentEncoding;
 
 int censorReferer = 0;
 int laxHttpParser = 1;
@@ -48,7 +51,8 @@ static AtomListPtr censoredHeaders;
 void
 preinitHttpParser()
 {
-    CONFIG_VARIABLE(censorReferer, CONFIG_TRISTATE, "Censor referer headers.");
+    CONFIG_VARIABLE_SETTABLE(censorReferer, CONFIG_TRISTATE, configIntSetter,
+                             "Censor referer headers.");
     censoredHeaders = makeAtomList(NULL, 0);
     if(censoredHeaders == NULL) {
         do_log(L_ERROR, "Couldn't allocate censored atoms.\n");
@@ -56,8 +60,8 @@ preinitHttpParser()
     }
     CONFIG_VARIABLE(censoredHeaders, CONFIG_ATOM_LIST_LOWER,
                     "Headers to censor.");
-    CONFIG_VARIABLE(laxHttpParser, CONFIG_BOOLEAN,
-                    "Ignore unknown HTTP headers.");
+    CONFIG_VARIABLE_SETTABLE(laxHttpParser, CONFIG_BOOLEAN, configIntSetter,
+                             "Ignore unknown HTTP headers.");
 }
 
 void
@@ -94,9 +98,13 @@ initHttpParser()
     A(atomRange, "range");
     A(atomVia, "via");
     A(atomContentType, "content-type");
+    A(atomContentEncoding, "content-encoding");
     A(atomVary, "vary");
     A(atomExpect, "expect");
     A(atomAuthorization, "authorization");
+    A(atomSetCookie, "set-cookie");
+    A(atomCookie, "cookie");
+    A(atomCookie2, "cookie2");
     A(atomXPolipoDate, "x-polipo-date");
     A(atomXPolipoAccess, "x-polipo-access");
     A(atomXPolipoLocation, "x-polipo-location");
@@ -694,7 +702,7 @@ urlSameHost(const char *url1, int len1, const char *url2, int len2)
 static char *
 resize_hbuf(char *hbuf, int *size, char *hbuf_small)
 {
-    int new_size = MIN(CHUNK_SIZE, 2 * *size);
+    int new_size = 2 * *size;
     char *new_hbuf;
 
     if(new_size <= *size)
@@ -758,6 +766,7 @@ httpParseHeaders(int client, AtomPtr url,
     char *im = NULL, *inm = NULL;
     AtomListPtr hopToHop = NULL;
     HTTPRangeRec range = {-1, -1, -1}, content_range = {-1, -1, -1};
+    int haveCacheControl = 0;
  
 #define RESIZE_HBUF() \
     do { \
@@ -769,8 +778,8 @@ httpParseHeaders(int client, AtomPtr url,
     cache_control.flags = 0;
     cache_control.max_age = -1;
     cache_control.s_maxage = -1;
-    cache_control.min_fresh = 0;
-    cache_control.max_stale = 0;
+    cache_control.min_fresh = -1;
+    cache_control.max_stale = -1;
     
     i = start;
 
@@ -788,10 +797,9 @@ httpParseHeaders(int client, AtomPtr url,
         if(name_start < 0)
             continue;
 
-        /* It's not worthwile to intern the name -- it will only be
-           compared once. */
-        
-        if(token_compare(buf, name_start, name_end, "connection")) {
+        name = internAtomLowerN(buf + name_start, name_end - name_start);
+
+        if(name == atomConnection) {
             j = getNextTokenInList(buf, value_start, 
                                    &token_start, &token_end, NULL, NULL,
                                    &end);
@@ -825,7 +833,11 @@ httpParseHeaders(int client, AtomPtr url,
                                        &token_start, &token_end, NULL, NULL,
                                        &end);
             }
-        }
+        } else if(name == atomCacheControl)
+            haveCacheControl = 1;
+
+        releaseAtom(name);
+        name = NULL;
     }
     
     i = start;
@@ -893,12 +905,6 @@ httpParseHeaders(int client, AtomPtr url,
                     len = -1;
                 }
             }
-        } else if(name == atomConnection || name == atomHost ||
-                  name == atomAcceptRange || name == atomTE ||
-                  name == atomProxyAuthenticate ||
-                  name == atomKeepAlive ||
-                  atomListMember(name, censoredHeaders)) {
-            ;
         } else if((!local && name == atomProxyAuthorization) ||
                   (local && name == atomAuthorization)) {
             if(auth_return) {
@@ -935,10 +941,13 @@ httpParseHeaders(int client, AtomPtr url,
                   name == atomXPolipoDate || name == atomXPolipoAccess) {
             time_t t;
             j = parse_time(buf, value_start, value_end, &t);
-            if(j < 0 && name != atomExpires) {
-                do_log(L_WARN, "Couldn't parse %s: ", name->string);
-                do_log_n(L_WARN, buf + value_start, value_end - value_start);
-                do_log(L_WARN, "\n");
+            if(j < 0) {
+                if(name != atomExpires) {
+                    do_log(L_WARN, "Couldn't parse %s: ", name->string);
+                    do_log_n(L_WARN, buf + value_start,
+                             value_end - value_start);
+                    do_log(L_WARN, "\n");
+                }
                 t = -1;
             }
             if(name == atomDate) {
@@ -1131,31 +1140,6 @@ httpParseHeaders(int client, AtomPtr url,
                                        &v_start, &v_end,
                                        &end);
             }
-        } else if(name == atomPragma) {
-            j = getNextTokenInList(buf, value_start,
-                                   &token_start, &token_end, NULL, NULL,
-                                   &end);
-            while(1) {
-                if(j < 0) {
-                    do_log(L_WARN, "Couldn't parse Pragma.\n");
-                    cache_control.flags |= CACHE_NO;
-                    break;
-                }
-                /* Pragma is only defined for the client, and the only
-                   standard value is no-cache (RFC 1945, 10.12).  We
-                   quietly ignore anything else. */
-                if(client &&
-                   token_compare(buf, token_start, token_end, "no-cache")) {
-                    cache_control.flags = CACHE_NO;
-                } else {
-                    /* Don't warn, triggers too often. */
-                }
-                if(end)
-                    break;
-                j = getNextTokenInList(buf, j, 
-                                       &token_start, &token_end, NULL, NULL,
-                                       &end);
-            }
         } else if(name == atomContentRange) {
             if(!client) {
                 j = parseContentRange(buf, value_start, 
@@ -1219,8 +1203,8 @@ httpParseHeaders(int client, AtomPtr url,
                 }
             } 
             if(name == atomVary) {
-                if(!token_compare(buf, value_start,value_end,
-                                  "host")) {
+                if(!token_compare(buf, value_start, value_end, "host") &&
+                   !token_compare(buf, value_start, value_end, "*")) {
                     /* What other vary headers should be ignored? */
                     do_log(L_VARY, "Vary header present (");
                     do_log_n(L_VARY,
@@ -1232,18 +1216,57 @@ httpParseHeaders(int client, AtomPtr url,
                 cache_control.flags |= CACHE_AUTHORIZATION;
             } 
 
-            if(hbuf && (!hopToHop || !atomListMember(name, hopToHop))) {
-                int h;
-                while(hbuf_length > hbuf_size - 2)
-                    RESIZE_HBUF();
-                hbuf[hbuf_length++] = '\r';
-                hbuf[hbuf_length++] = '\n';
-                do {
-                    h = snnprint_n(hbuf, hbuf_length, hbuf_size,
-                                   buf + name_start, value_end - name_start);
-                    if(h < 0) RESIZE_HBUF();
-                } while(h < 0);
-                hbuf_length = h;
+            if(name == atomPragma) {
+                /* Pragma is only defined for the client, and the only
+                   standard value is no-cache (RFC 1945, 10.12).
+                   However, we honour a Pragma: no-cache for both the client
+                   and the server when there's no Cache-Control header.  In
+                   all cases, we pass the Pragma header to the next hop. */
+                if(!haveCacheControl) {
+                    j = getNextTokenInList(buf, value_start,
+                                           &token_start, &token_end, NULL, NULL,
+                                           &end);
+                    while(1) {
+                        if(j < 0) {
+                            do_log(L_WARN, "Couldn't parse Pragma.\n");
+                            cache_control.flags |= CACHE_NO;
+                            break;
+                        }
+                        if(token_compare(buf, token_start, token_end,
+                                         "no-cache"))
+                            cache_control.flags = CACHE_NO;
+                        if(end)
+                            break;
+                        j = getNextTokenInList(buf, j, &token_start, &token_end,
+                                               NULL, NULL, &end);
+                    }
+                }
+            }
+            if(!client &&
+               (name == atomSetCookie || 
+                name == atomCookie || name == atomCookie2))
+                cache_control.flags |= CACHE_COOKIE;
+
+            if(hbuf) {
+                if(name != atomConnection && name != atomHost &&
+                   name != atomAcceptRange && name != atomTE &&
+                   name != atomProxyAuthenticate &&
+                   name != atomKeepAlive &&
+                   (!hopToHop || !atomListMember(name, hopToHop)) &&
+                   !atomListMember(name, censoredHeaders)) {
+                    int h;
+                    while(hbuf_length > hbuf_size - 2)
+                        RESIZE_HBUF();
+                    hbuf[hbuf_length++] = '\r';
+                    hbuf[hbuf_length++] = '\n';
+                    do {
+                        h = snnprint_n(hbuf, hbuf_length, hbuf_size,
+                                       buf + name_start, 
+                                       value_end - name_start);
+                        if(h < 0) RESIZE_HBUF();
+                    } while(h < 0);
+                    hbuf_length = h;
+                }
             }
         }
         releaseAtom(name);
@@ -1263,7 +1286,8 @@ httpParseHeaders(int client, AtomPtr url,
     hbuf_size = 0;
 
     if(request)
-        request->persistent &= persistent;
+        if(!persistent)
+            request->flags &= ~REQUEST_PERSISTENT;
 
     if(te != TE_IDENTITY) len = -1;
     if(len_return) *len_return = len;
@@ -1345,6 +1369,36 @@ httpParseHeaders(int client, AtomPtr url,
         
     return -1;
 #undef RESIZE_HBUF
+}
+
+int
+httpFindHeader(AtomPtr header, const char *headers, int hlen,
+               int *value_begin_return, int *value_end_return)
+{
+    int len = header->length;
+    int i = 0;
+
+    while(i + len + 1 < hlen) {
+        if(headers[i + len] == ':' &&
+           lwrcmp(headers + i, header->string, len) == 0) {
+            int j = i + len + 1, k;
+            while(j < hlen && headers[j] == ' ')
+                j++;
+            k = j;
+            while(k < hlen && headers[k] != '\n' && headers[k] != '\r')
+                k++;
+            *value_begin_return = j;
+            *value_end_return = k;
+            return 1;
+        } else {
+            while(i < hlen && headers[i] != '\n' && headers[i] != '\r')
+                i++;
+            i++;
+            if(i < hlen && headers[i] == '\n')
+                i++;
+        }
+    }
+    return 0;
 }
 
 int
@@ -1491,6 +1545,3 @@ checkVia(AtomPtr name, AtomPtr via)
     }
     return 1;
 }
-
-
-        

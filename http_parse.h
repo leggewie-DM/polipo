@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003, 2004 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,7 @@ typedef struct HTTPRange {
 } HTTPRangeRec, *HTTPRangePtr;
 
 extern int censorReferer;
+extern AtomPtr atomContentType, atomContentEncoding;
 
 void preinitHttpParser(void);
 void initHttpParser(void);
@@ -47,7 +48,8 @@ int httpParseHeaders(int, AtomPtr, const char *, int, HTTPRequestPtr,
                      time_t*, time_t*, time_t*, time_t*, time_t*,
                      int*, int*, char**, AtomPtr*,
                      HTTPRangePtr, HTTPRangePtr, char**, AtomPtr*, AtomPtr*);
-
+int httpFindHeader(AtomPtr header, const char *headers, int hlen,
+                   int *value_begin_return, int *value_end_return);
 int parseUrl(const char *url, int len,
              int *x_return, int *y_return, int *port_return, int *z_return);
 int urlIsLocal(const char *url, int len);

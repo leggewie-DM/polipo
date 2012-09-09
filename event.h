@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,17 @@ typedef struct _FdEventHandler {
     char data[1];
 } FdEventHandlerRec, *FdEventHandlerPtr;
 
+typedef struct _ConditionHandler {
+    struct _Condition *condition;
+    struct _ConditionHandler *previous, *next;
+    int (*handler)(int, struct _ConditionHandler*);
+    char data[1];
+} ConditionHandlerRec, *ConditionHandlerPtr;
+
+typedef struct _Condition {
+    ConditionHandlerPtr handlers;
+} ConditionRec, *ConditionPtr;
+
 void initEvents(void);
 void uninitEvents(void);
 void interestingSignals(sigset_t *ss);
@@ -47,7 +58,7 @@ TimeEventHandlerPtr scheduleTimeEvent(int seconds,
                                       int (*handler)(TimeEventHandlerPtr),
                                       int dsize, void *data);
 
-int timeval_minus_usec(struct timeval *s1, struct timeval *s2)
+int timeval_minus_usec(const struct timeval *s1, const struct timeval *s2)
      ATTRIBUTE((pure));
 void cancelTimeEvent(TimeEventHandlerPtr);
 int allocateFdEventNum(int fd);
@@ -65,6 +76,13 @@ void unregisterFdEvent(FdEventHandlerPtr event);
 void pokeFdEvent(int fd, int status, int what);
 int workToDo(void);
 void eventLoop(void);
+ConditionPtr makeCondition(void);
+void initCondition(ConditionPtr);
+void signalCondition(ConditionPtr condition);
+ConditionHandlerPtr 
+conditionWait(ConditionPtr condition,
+              int (*handler)(int, ConditionHandlerPtr),
+              int dsize, void *data);
+void unregisterConditionHandler(ConditionHandlerPtr);
+void abortConditionHandler(ConditionHandlerPtr);
 void polipoExit(void);
-
-void reconfigure(void);

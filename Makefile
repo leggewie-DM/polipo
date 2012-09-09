@@ -5,21 +5,25 @@ INFODIR = $(PREFIX)/info
 LOCAL_ROOT = /usr/share/polipo/www
 DISK_CACHE_ROOT = /var/cache/polipo
 
-# CDEBUGFLAGS = -O
+# To compile with Unix CC:
 
-# If using GCC 4, you will probably want to add -Wno-pointer-sign.
+# CDEBUGFLAGS=-O
+
+# To compile with GCC:
 
 # CC = gcc
-# CDEBUGFLAGS = -O -g -Wall -std=gnu99
-CDEBUGFLAGS = -O -g -Wall
+# CDEBUGFLAGS = -Os -g -Wall -std=gnu99
+CDEBUGFLAGS = -Os -g -Wall
 # CDEBUGFLAGS = -Os -Wall
 # CDEBUGFLAGS = -g -Wall
+
+# To compile on a pure POSIX system:
 
 # CC = c89
 # CC = c99
 # CDEBUGFLAGS=-O
 
-# To compile with icc, you need -restrict.  (Their bug.)
+# To compile with icc 7, you need -restrict.  (Their bug.)
 
 # CC=icc
 # CDEBUGFLAGS = -O -restrict
@@ -32,6 +36,11 @@ CDEBUGFLAGS = -O -g -Wall
 
 # LDLIBS = -lsocket -lnsl -lresolv
 
+# On mingw, you need
+
+# EXE=.exe
+# LDLIBS = -lwsock32
+
 FILE_DEFINES = -DLOCAL_ROOT=\"$(LOCAL_ROOT)/\" \
                -DDISK_CACHE_ROOT=\"$(DISK_CACHE_ROOT)/\"
 
@@ -40,12 +49,16 @@ FILE_DEFINES = -DLOCAL_ROOT=\"$(LOCAL_ROOT)/\" \
 #  -DNO_DISK_CACHE to compile out the on-disk cache and local web server;
 #  -DNO_IPv6 to avoid using the RFC 3493 API and stick to stock
 #      Berkeley sockets;
-#  -DHAVE_IPv6 to use the RFC 3493 API;
+#  -DHAVE_IPv6 to force the use of the RFC 3493 API on systems other
+#      than GNU/Linux and BSD (let me know if it works);
 #  -DNO_FANCY_RESOLVER to compile out the asynchronous name resolution
 #      code;
 #  -DNO_STANDARD_RESOLVER to compile out the code that falls back to
-#      gethostbyname/getaddrinfo when DNS requests fail.
-#  -DNO_TUNNEL to compile out the code that handles CONNECT requests.
+#      gethostbyname/getaddrinfo when DNS requests fail;
+#  -DNO_TUNNEL to compile out the code that handles CONNECT requests;
+#  -DNO_SOCKS to compile out the SOCKS gateway code.
+#  -DNO_FORBIDDEN to compile out the all of the forbidden URL code
+#  -DNO_REDIRECTOR to compile out the Squid-style redirector code
 
 DEFINES = $(FILE_DEFINES) $(PLATFORM_DEFINES)
 
@@ -54,21 +67,23 @@ CFLAGS = $(MD5INCLUDES) $(CDEBUGFLAGS) $(DEFINES) $(EXTRA_DEFINES)
 SRCS = util.c event.c io.c chunk.c atom.c object.c log.c diskcache.c main.c \
        config.c local.c http.c client.c server.c auth.c tunnel.c \
        http_parse.c parse_time.c dns.c forbidden.c \
-       md5import.c md5.c ftsimport.c fts_compat.c
+       md5import.c md5.c ftsimport.c fts_compat.c socks.c mingw.c
 
 OBJS = util.o event.o io.o chunk.o atom.o object.o log.o diskcache.o main.o \
        config.o local.o http.o client.o server.o auth.o tunnel.o \
        http_parse.o parse_time.o dns.o forbidden.o \
-       md5import.o ftsimport.o \
+       md5import.o ftsimport.o socks.o mingw.o
 
-polipo: $(OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) -o polipo $(OBJS) $(MD5LIBS) $(LDLIBS)
+polipo$(EXE): $(OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o polipo$(EXE) $(OBJS) $(MD5LIBS) $(LDLIBS)
 
 ftsimport.o: ftsimport.c fts_compat.c
 
 md5import.o: md5import.c md5.c
 
-all: polipo polipo.info html/index.html localindex.html
+.PHONY: all install install.binary install.man
+
+all: polipo$(EXE) polipo.info html/index.html localindex.html
 
 install: install.binary install.man
 
@@ -117,8 +132,10 @@ polipo.man.html: polipo.man
 TAGS: $(SRCS)
 	etags $(SRCS)
 
+.PHONY: clean
+
 clean:
-	-rm -f polipo *.o *~ core TAGS gmon.out
+	-rm -f polipo$(EXE) *.o *~ core TAGS gmon.out
 	-rm -f polipo.cp polipo.fn polipo.log polipo.vr
 	-rm -f polipo.cps polipo.info* polipo.pg polipo.toc polipo.vrs
 	-rm -f polipo.aux polipo.dvi polipo.ky polipo.ps polipo.tp

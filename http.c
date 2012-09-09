@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003, 2004 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,14 @@ THE SOFTWARE.
 
 #include "polipo.h"
 
+int disableProxy = 0;
 AtomPtr proxyName = NULL;
 int proxyPort = 8123;
+
+int clientTimeout = 120;
+int serverTimeout = 90;
+
+int bigBufferSize = (32 * 1024);
 
 AtomPtr authRealm = NULL;
 AtomPtr authCredentials = NULL;
@@ -36,8 +42,11 @@ NetAddressPtr allowedNets = NULL;
 IntListPtr allowedPorts = NULL;
 IntListPtr tunnelAllowedPorts = NULL;
 int expectContinue = 1;
+int dontTrustVaryETag = 1;
 
 AtomPtr atom100Continue;
+
+int disableVia = 1;
 
 /* 0 means that all failures lead to errors.  1 means that failures to
    connect are reported in a Warning header when stale objects are
@@ -50,25 +59,34 @@ int proxyOffline = 0;
 int relaxTransparency = 0;
 AtomPtr proxyAddress = NULL;
 
+static int timeoutSetter(ConfigVariablePtr var, void *value);
+
 void
 preinitHttp()
 {
     proxyAddress = internAtom("127.0.0.1");
-    CONFIG_VARIABLE(proxyOffline, CONFIG_BOOLEAN,
-                    "Avoid contacting remote servers.");
-    CONFIG_VARIABLE(relaxTransparency, CONFIG_TRISTATE,
-                    "Avoid contacting remote servers.");
+    CONFIG_VARIABLE_SETTABLE(disableProxy, CONFIG_BOOLEAN, configIntSetter,
+                             "Whether to be a web server only.");
+    CONFIG_VARIABLE_SETTABLE(proxyOffline, CONFIG_BOOLEAN, configIntSetter,
+                             "Avoid contacting remote servers.");
+    CONFIG_VARIABLE_SETTABLE(relaxTransparency, CONFIG_TRISTATE, 
+                             configIntSetter,
+                             "Avoid contacting remote servers.");
     CONFIG_VARIABLE(proxyPort, CONFIG_INT,
                     "The TCP port on which the proxy listens.");
     CONFIG_VARIABLE(proxyAddress, CONFIG_ATOM_LOWER,
                     "The IP address on which the proxy listens.");
-    CONFIG_VARIABLE(proxyName, CONFIG_ATOM_LOWER,
-                    "The name under which the proxy is known.");
+    CONFIG_VARIABLE_SETTABLE(proxyName, CONFIG_ATOM_LOWER, configAtomSetter,
+                             "The name by which the proxy is known.");
+    CONFIG_VARIABLE_SETTABLE(clientTimeout, CONFIG_TIME, 
+                             timeoutSetter, "Client-side timeout.");
+    CONFIG_VARIABLE_SETTABLE(serverTimeout, CONFIG_TIME,
+                             timeoutSetter, "Server-side timeout.");
     CONFIG_VARIABLE(authRealm, CONFIG_ATOM,
                     "Authentication realm.");
-    CONFIG_VARIABLE(authCredentials, CONFIG_ATOM,
+    CONFIG_VARIABLE(authCredentials, CONFIG_PASSWORD,
                     "username:password.");
-    CONFIG_VARIABLE(parentAuthCredentials, CONFIG_ATOM,
+    CONFIG_VARIABLE(parentAuthCredentials, CONFIG_PASSWORD,
                     "username:password.");
     CONFIG_VARIABLE(allowedClients, CONFIG_ATOM_LIST_LOWER,
                     "Networks from which clients are allowed to connect.");
@@ -78,13 +96,28 @@ preinitHttp()
                     "Ports to which connections are allowed.");
     CONFIG_VARIABLE(expectContinue, CONFIG_TRISTATE,
                     "Send Expect-Continue to servers.");
+    CONFIG_VARIABLE(bigBufferSize, CONFIG_INT,
+                    "Size of big buffers (max size of headers).");
+    CONFIG_VARIABLE_SETTABLE(disableVia, CONFIG_BOOLEAN, configIntSetter,
+                             "Don't use Via headers.");
+    CONFIG_VARIABLE(dontTrustVaryETag, CONFIG_TRISTATE,
+                    "Whether to trust the ETag when there's Vary.");
     preinitHttpParser();
+}
+
+static int
+timeoutSetter(ConfigVariablePtr var, void *value)
+{
+    configIntSetter(var, value);
+    if(clientTimeout <= serverTimeout)
+        clientTimeout = serverTimeout + 1;
+    return 1;
 }
 
 void
 initHttp()
 {
-    char *buf = get_chunk();
+    char *buf = NULL;
     int namelen;
     int n;
     struct hostent *host;
@@ -92,6 +125,12 @@ initHttp()
     initHttpParser();
 
     atom100Continue = internAtom("100-continue");
+
+    if(clientTimeout <= serverTimeout) {
+        clientTimeout = serverTimeout + 1;
+        do_log(L_WARN, "Value of clientTimeout too small -- setting to %d.\n",
+               clientTimeout);
+    }
 
     if(authCredentials != NULL && authRealm == NULL)
         authRealm = internAtom("Polipo");
@@ -108,7 +147,7 @@ initHttp()
             do_log(L_ERROR, "Couldn't allocate allowedPorts.\n");
             exit(1);
         }
-        intListCons(80, 86, allowedPorts);
+        intListCons(80, 100, allowedPorts);
         intListCons(1024, 0xFFFF, allowedPorts);
     }
 
@@ -118,14 +157,20 @@ initHttp()
             do_log(L_ERROR, "Couldn't allocate tunnelAllowedPorts.\n");
             exit(1);
         }
-        intListCons(22, 22, tunnelAllowedPorts);
-        intListCons(80, 80, tunnelAllowedPorts);
-        intListCons(443, 443, tunnelAllowedPorts);
+        intListCons(22, 22, tunnelAllowedPorts);   /* ssh */
+        intListCons(80, 80, tunnelAllowedPorts);   /* HTTP */
+        intListCons(109, 110, tunnelAllowedPorts); /* POP 2 and 3*/
+        intListCons(143, 143, tunnelAllowedPorts); /* IMAP 2/4 */
+        intListCons(443, 443, tunnelAllowedPorts); /* HTTP/SSL */
+        intListCons(873, 873, tunnelAllowedPorts); /* rsync */
+        intListCons(993, 993, tunnelAllowedPorts); /* IMAP/SSL */
+        intListCons(995, 995, tunnelAllowedPorts); /* POP/SSL */
     }
 
     if(proxyName)
         return;
 
+    buf = get_chunk();
     if(buf == NULL) {
         do_log(L_ERROR, "Couldn't allocate chunk for host name.\n");
         goto fail;
@@ -140,7 +185,9 @@ initHttp()
     /* gethostname doesn't necessarily NUL-terminate on overflow */
     buf[CHUNK_SIZE - 1] = '\0';
 
-    if(strcmp(buf, "(none)") == 0) {
+    if(strcmp(buf, "(none)") == 0 ||
+       strcmp(buf, "localhost") == 0 ||
+       strcmp(buf, "localhost.localdomain") == 0) {
         do_log(L_WARN, "Couldn't determine host name -- using ``polipo''.\n");
         strcpy(buf, "polipo");
         goto success;
@@ -159,7 +206,8 @@ initHttp()
 
     host = gethostbyaddr(host->h_addr_list[0], host->h_length,  AF_INET);
 
-    if(!host || !host->h_name || strcmp(host->h_name, "localhost") == 0)
+    if(!host || !host->h_name || strcmp(host->h_name, "localhost") == 0 ||
+       strcmp(host->h_name, "localhost.localdomain") == 0)
         goto success;
 
     namelen = strlen(host->h_name);
@@ -199,8 +247,8 @@ httpSetTimeout(HTTPConnectionPtr connection, int secs)
         new = scheduleTimeEvent(secs, httpTimeoutHandler,
                                 sizeof(connection), &connection);
         if(!new) {
-            do_log(L_ERROR, "Couldn't schedule timeout for connection 0x%x\n",
-                   (unsigned)connection);
+            do_log(L_ERROR, "Couldn't schedule timeout for connection 0x%lx\n",
+                   (unsigned long)connection);
             return -1;
         }
     } else {
@@ -301,7 +349,7 @@ httpWriteObjectHeaders(char *buf, int offset, int len,
     if(n < 0)
         goto fail;
 
-    if(object->via)
+    if(!disableVia && object->via)
         n = snnprintf(buf, n, len, "\r\nVia: %s", object->via->string);
 
     if(object->headers)
@@ -398,9 +446,6 @@ httpPrintCacheControl(char *buf, int offset, int len,
             n = snnprintf(buf, n, len, "max-stale=%d",
                           cache_control->min_fresh);
         }
-    }
-    if(flags & CACHE_NO) {
-        n = snnprintf(buf, n, len, "\r\nPragma: no-cache");
     }
     return n;
 #undef PRINT_SEP
@@ -528,24 +573,49 @@ void
 httpDestroyConnection(HTTPConnectionPtr connection)
 {
     assert(connection->flags == 0);
-    if(connection->buf)
-        dispose_chunk(connection->buf);
+    httpConnectionDestroyBuf(connection);
     assert(!connection->request);
     assert(!connection->request_last);
-    dispose_chunk(connection->reqbuf);
+    httpConnectionDestroyReqbuf(connection);
     assert(!connection->timeout);
     assert(!connection->server);
     free(connection);
 }
 
+void
+httpConnectionDestroyBuf(HTTPConnectionPtr connection)
+{
+    if(connection->buf) {
+        if(connection->flags & CONN_BIGBUF)
+            free(connection->buf);
+        else
+            dispose_chunk(connection->buf);
+    }
+    connection->flags &= ~CONN_BIGBUF;
+    connection->buf = NULL;
+}
+
+void
+httpConnectionDestroyReqbuf(HTTPConnectionPtr connection)
+{
+    if(connection->reqbuf) {
+        if(connection->flags & CONN_BIGREQBUF)
+            free(connection->reqbuf);
+        else
+            dispose_chunk(connection->reqbuf);
+    }
+    connection->flags &= ~CONN_BIGREQBUF;
+    connection->reqbuf = NULL;
+}
+
 HTTPRequestPtr 
 httpMakeRequest()
-
 {
     HTTPRequestPtr request;
     request = malloc(sizeof(HTTPRequestRec));
     if(request == NULL)
         return NULL;
+    request->flags = 0;
     request->connection = NULL;
     request->object = NULL;
     request->method = METHOD_UNKNOWN;
@@ -554,12 +624,8 @@ httpMakeRequest()
     request->cache_control = no_cache_control;
     request->condition = NULL;
     request->via = NULL;
-    request->persistent = 0;
-    request->wait_continue = 0;
+    request->chandler = NULL;
     request->can_mutate = NULL;
-    request->ohandler = NULL;
-    request->requested = 0;
-    request->force_error = 0;
     request->error_code = 0;
     request->error_message = NULL;
     request->error_headers = NULL;
@@ -579,7 +645,7 @@ httpDestroyRequest(HTTPRequestPtr request)
     if(request->condition)
         httpDestroyCondition(request->condition);
     releaseAtom(request->via);
-    assert(request->ohandler == NULL);
+    assert(request->chandler == NULL);
     releaseAtom(request->error_message);
     releaseAtom(request->headers);
     releaseAtom(request->error_headers);
@@ -615,6 +681,84 @@ httpDequeueRequest(HTTPConnectionPtr connection)
         request->next = NULL;
     }
     return request;
+}
+
+int
+httpConnectionBigify(HTTPConnectionPtr connection)
+{
+    char *bigbuf;
+    assert(!(connection->flags & CONN_BIGBUF));
+
+    if(bigBufferSize <= CHUNK_SIZE)
+        return 0;
+
+    bigbuf = malloc(bigBufferSize);
+    if(bigbuf == NULL)
+        return -1;
+    if(connection->len > 0)
+        memcpy(bigbuf, connection->buf, connection->len);
+    if(connection->buf)
+        dispose_chunk(connection->buf);
+    connection->buf = bigbuf;
+    connection->flags |= CONN_BIGBUF;
+    return 1;
+}
+
+int
+httpConnectionBigifyReqbuf(HTTPConnectionPtr connection)
+{
+    char *bigbuf;
+    assert(!(connection->flags & CONN_BIGREQBUF));
+
+    if(bigBufferSize <= CHUNK_SIZE)
+        return 0;
+
+    bigbuf = malloc(bigBufferSize);
+    if(bigbuf == NULL)
+        return -1;
+    if(connection->reqlen > 0)
+        memcpy(bigbuf, connection->reqbuf, connection->reqlen);
+    if(connection->reqbuf)
+        dispose_chunk(connection->reqbuf);
+    connection->reqbuf = bigbuf;
+    connection->flags |= CONN_BIGREQBUF;
+    return 1;
+}
+
+int
+httpConnectionUnbigify(HTTPConnectionPtr connection)
+{
+    char *buf;
+    assert(connection->flags & CONN_BIGBUF);
+    assert(connection->len < CHUNK_SIZE);
+
+    buf = get_chunk();
+    if(buf == NULL)
+        return -1;
+    if(connection->len > 0)
+        memcpy(buf, connection->buf, connection->len);
+    free(connection->buf);
+    connection->buf = buf;
+    connection->flags &= ~CONN_BIGBUF;
+    return 1;
+}
+
+int
+httpConnectionUnbigifyReqbuf(HTTPConnectionPtr connection)
+{
+    char *buf;
+    assert(connection->flags & CONN_BIGREQBUF);
+    assert(connection->reqlen < CHUNK_SIZE);
+
+    buf = get_chunk();
+    if(buf == NULL)
+        return -1;
+    if(connection->reqlen > 0)
+        memcpy(buf, connection->reqbuf, connection->reqlen);
+    free(connection->reqbuf);
+    connection->reqbuf = buf;
+    connection->flags &= ~CONN_BIGREQBUF;
+    return 1;
 }
 
 HTTPConditionPtr 
@@ -694,6 +838,7 @@ httpWriteErrorHeaders(char *buf, int size, int offset, int do_body,
     int n, m, i;
     char *body;
     char htmlMessage[100];
+    char timeStr[100];
 
     assert(code != 0);
 
@@ -714,24 +859,38 @@ httpWriteErrorHeaders(char *buf, int size, int offset, int do_body,
                       "\"-//W3C//DTD HTML 4.01 Transitional//EN\" "
                       "\"http://www.w3.org/TR/html4/loose.dtd\">"
                       "\n<html><head>"
-                      "\n<title>Proxy error: %3d %s.</title>"
+                      "\n<title>Proxy %s: %3d %s.</title>"
                       "\n</head><body>"
-                      "\n<p>The proxy on %s:%d "
-                      "encountered the following error",
-                      code, htmlMessage, 
-                      proxyName->string, proxyPort);
+                      "\n<h1>%3d %s</h1>"
+                      "\n<p>The following %s",
+                      code >= 400 ? "error" : "result",
+                      code, htmlMessage,
+                      code, htmlMessage,
+                      code >= 400 ? 
+                      "error occurred" :
+                      "status was returned");
         if(url_len > 0) {
             m = snnprintf(body, m, CHUNK_SIZE,
-                          " while fetching <strong>");
+                          " while trying to access <strong>");
             m = htmlString(body, m, CHUNK_SIZE, url, url_len);
             m = snnprintf(body, m, CHUNK_SIZE, "</strong>");
         }
+
+        {
+            /* On BSD systems, tv_sec is a long. */
+            const time_t ct = current_time.tv_sec;
+                                             /*Mon, 24 Sep 2004 17:46:35 GMT*/
+            strftime(timeStr, sizeof(timeStr), "%a, %d %b %Y %H:%M:%S %Z",
+                     localtime(&ct));
+        }
         
         m = snnprintf(body, m, CHUNK_SIZE,
-                      ":<br>"
+                      ":<br><br>"
                       "\n<strong>%3d %s</strong></p>"
+                      "\n<hr>Generated %s by Polipo on <em>%s:%d</em>."
                       "\n</body></html>\r\n",
-                      code, htmlMessage);
+                      code, htmlMessage,
+                      timeStr, proxyName->string, proxyPort);
         if(m <= 0 || m >= CHUNK_SIZE) {
             do_log(L_ERROR, "Couldn't write error body.\n");
             dispose_chunk(body);
@@ -786,4 +945,127 @@ httpWriteErrorHeaders(char *buf, int size, int offset, int do_body,
         dispose_chunk(body);
 
     return n;
+}
+
+AtomListPtr
+urlDecode(char *buf, int n)
+{
+    char mybuf[500];
+    int i, j = 0;
+    AtomListPtr list;
+    AtomPtr atom;
+
+    list = makeAtomList(NULL, 0);
+    if(list == NULL)
+        return NULL;
+
+    i = 0;
+    while(i < n) {
+        if(buf[i] == '%') {
+            int a, b;
+            if(i + 3 > n)
+                goto fail;
+            a = h2i(buf[i + 1]);
+            b = h2i(buf[i + 2]);
+            if(a < 0 || b < 0)
+                goto fail;
+            mybuf[j++] = (char)((a << 4) | b);
+            i += 3;
+            if(j > 500) goto fail;
+        } else if(buf[i] == '&') {
+            atom = internAtomN(mybuf, j);
+            if(atom == NULL)
+                goto fail;
+            atomListCons(atom, list);
+            j = 0;
+            i++;
+        } else {
+            mybuf[j++] = buf[i++];
+            if(j > 500) goto fail;
+        }
+    }
+
+    atom = internAtomN(mybuf, j);
+    if(atom == NULL)
+        goto fail;
+    atomListCons(atom, list);
+    return list;
+
+ fail:
+    destroyAtomList(list);
+    return NULL;
+}
+
+void
+httpTweakCachability(ObjectPtr object)
+{
+    int code = object->code;
+
+    if((object->cache_control & CACHE_AUTHORIZATION) &&
+       !(object->cache_control & CACHE_PUBLIC))
+        object->cache_control |= (CACHE_NO_HIDDEN | OBJECT_LINEAR);
+
+    /* This is not required by RFC 2616 -- but see RFC 3143 2.1.1.  We
+       manically avoid caching replies that we don't know how to
+       handle, even if Expires or Cache-Control says otherwise.  As to
+       known uncacheable replies, we obey Cache-Control and default to
+       allowing sharing but not caching. */
+    if(code != 200 && code != 206 && 
+       code != 300 && code != 301 && code != 302 && code != 303 &&
+       code != 304 && code != 307 &&
+       code != 403 && code != 404 && code != 405 && code != 416) {
+        object->cache_control |=
+            (CACHE_NO_HIDDEN | CACHE_MISMATCH | OBJECT_LINEAR);
+    } else if(code != 200 && code != 206 &&
+              code != 300 && code != 301 && code != 304 &&
+              code != 410) {
+        if(object->expires < 0 && !(object->cache_control & CACHE_PUBLIC)) {
+            object->cache_control |= CACHE_NO_HIDDEN;
+        }
+    } else if(dontCacheRedirects && (code == 301 || code == 302)) {
+        object->cache_control |= CACHE_NO_HIDDEN;
+    }
+
+    if(urlIsUncachable(object->key, object->key_size)) {
+        object->cache_control |= CACHE_NO_HIDDEN;
+    }
+
+    if((object->cache_control & CACHE_NO_STORE) != 0) {
+        object->cache_control |= CACHE_NO_HIDDEN;
+    }
+
+    if(object->cache_control & CACHE_VARY) {
+        if(!object->etag || dontTrustVaryETag >= 2) {
+            object->cache_control |= CACHE_MISMATCH;
+        }
+    }
+}
+
+int
+httpHeaderMatch(AtomPtr header, AtomPtr headers1, AtomPtr headers2)
+{
+    int rc1, b1, e1, rc2, b2, e2;
+
+    /* Short cut if both sets of headers are identical */
+    if(headers1 == headers2)
+        return 1;
+
+    rc1 = httpFindHeader(header, headers1->string, headers1->length,
+                         &b1, &e1);
+    rc2 = httpFindHeader(header, headers2->string, headers2->length,
+                         &b2, &e2);
+
+    if(rc1 == 0 && rc2 == 0)
+        return 1;
+
+    if(rc1 == 0 || rc2 == 0)
+        return 0;
+
+    if(e1 - b1 != e2 - b2)
+        return 0;
+
+    if(memcmp(headers1->string + b1, headers2->string + b2, e1 - b1) != 0)
+        return 0;
+
+    return 1;
 }

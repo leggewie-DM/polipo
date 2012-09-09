@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2003 by Juliusz Chroboczek
+Copyright (c) 2003-2006 by Juliusz Chroboczek
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,29 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+extern AtomPtr forbiddenUrl;
+extern int forbiddenRedirectCode;
+
+typedef struct _RedirectRequest {
+    AtomPtr url;
+    struct _RedirectRequest *next;
+    int (*handler)(int, AtomPtr, AtomPtr, AtomPtr, void*);
+    void *data;
+} RedirectRequestRec, *RedirectRequestPtr;
 
 void preinitForbidden(void);
 void initForbidden(void);
-int urlForbidden(char *url, int url_size);
+int urlIsUncachable(char *url, int length);
+int urlForbidden(AtomPtr url,
+                 int (*handler)(int, AtomPtr, AtomPtr, AtomPtr, void*),
+                 void *closure);
+void redirectorKill(void);
+int redirectorStreamHandler1(int status,
+                             FdEventHandlerPtr event,
+                             StreamRequestPtr srequest);
+int redirectorStreamHandler2(int status,
+                             FdEventHandlerPtr event,
+                             StreamRequestPtr srequest);
+void redirectorTrigger(void);
+int 
+runRedirector(pid_t *pid_return, int *read_fd_return, int *write_fd_return);
