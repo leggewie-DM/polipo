@@ -1,3 +1,4 @@
 10_makefile.patch
 20_config.patch
 30_Don-t-spuriously-ignore-CNAMEs-after-a-DNS-timeout.patch
+40_CVE-2011-3596.patch
