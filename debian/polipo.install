@@ -1,0 +1,2 @@
+debian/helper-scripts/polipo/polipo-control usr/lib/polipo
+debian/options etc/polipo
