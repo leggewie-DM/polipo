@@ -1,0 +1,3 @@
+10_makefile.patch
+20_config.patch
+30_Don-t-spuriously-ignore-CNAMEs-after-a-DNS-timeout.patch

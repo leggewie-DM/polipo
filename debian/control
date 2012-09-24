@@ -2,8 +2,8 @@ Source: polipo
 Section: web
 Priority: optional
 Maintainer: Erinn Clark <erinn@torproject.org>
-Build-Depends: debhelper (>= 5), cdbs, texinfo, dpatch
-Standards-Version: 3.8.4
+Build-Depends: debhelper (>= 9), cdbs, texinfo
+Standards-Version: 3.9.3
 Homepage: http://www.pps.jussieu.fr/~jch/software/polipo/
 
 Package: polipo
