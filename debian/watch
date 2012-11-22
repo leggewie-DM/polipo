@@ -1,2 +1,3 @@
 version=3
-http://www.pps.jussieu.fr/~jch/software/files/polipo/ polipo-(\d*\.\d*\.\d*)\.tar\.gz
+opts=uversionmangle=s/^200\d*$/0.0.$1/ \
+http://freehaven.net/~chrisd/polipo/polipo-(\d.*)\.(?:tgz|tar\.(?:gz|bz2|xz))
