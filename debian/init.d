@@ -6,10 +6,11 @@
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: Start or stop the polipo web cache
+# Description:       This script controls caching web proxy.
+#                    It is called from the boot, halt and reboot scripts.
 ### END INIT INFO
 #
 # Author:	Tom Ellis Huckstep <tom-debian-polipo@jaguarpaw.co.uk>
-#
 
 set -e
 
@@ -20,6 +21,8 @@ test -x $PPCTL  || exit 0
 
 NAME=polipo
 DESC=polipo
+
+. /lib/lsb/init-functions
 
 # Include polipo defaults if available
 #if [ -f /etc/default/polipo ] ; then
@@ -43,6 +46,9 @@ case "$1" in
 	echo -n "Stopping $DESC: "
         $PPCTL stop
 	echo "$NAME."
+	;;
+  status)
+	status_of_proc /usr/bin/$NAME $NAME
 	;;
   #reload)
 	#
