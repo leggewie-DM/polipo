@@ -2,7 +2,7 @@ polipo (1.0.4.1-1.2) unstable; urgency=low
 
   * Non-maintainer upload.
   * Enable hardened build flags, patch by Steven Chamberlain (Closes: #666451)
-  * Fix CVE-2011-3596 (Closes: #644289)	
+  * Fix CVE-2011-3596 (Closes: #644289)
 
  -- Moritz Muehlenhoff <jmm@debian.org>  Fri, 01 Jun 2012 16:46:13 +0200
 
@@ -24,13 +24,13 @@ polipo (1.0.4.1-1) unstable; urgency=low
 
   * New maintainer.
   * New upstream release.
-  * Update Standards-Version to 3.8.4. 
-  * Remove duplicate word in long description (closes: #574613) 
+  * Update Standards-Version to 3.8.4.
+  * Remove duplicate word in long description (closes: #574613)
   * Remove 30_log-permission patch. (closes: #481601)
   * Remove 40_segfault_max_age.dpatch. (closes: #547047)
   * Remove 50_integer_overflow.dpatch. Fixed upstream.
   * Remove 60_security_fixes.dpatch. Fixed upstream.
-  * Put /var/cache/polipo and /var/log/polipo in the .deb and 
+  * Put /var/cache/polipo and /var/log/polipo in the .deb and
     stop managing them in postinst and postrm.
   * Remove offline and online options from polipo-control.
 
@@ -184,7 +184,7 @@ polipo (0.9.4-3) unstable; urgency=low
     so that it actually applies.
   * polipo-control: Quote "`nameOfPID $PID`".  Thanks to Gergely Nagy,
     closes: #251071
-  * Applied polipo--devel--0--patch-25 to fix char signedness issues. 
+  * Applied polipo--devel--0--patch-25 to fix char signedness issues.
     Thanks to Gergely Nagy, closes #250419
 
  -- Tom Huckstep <tom-debian-polipo@jaguarpaw.co.uk>  Sun, 30 May 2004 22:20:36 +0100
@@ -275,7 +275,7 @@ polipo (0.9-2) unstable; urgency=low
 polipo (0.9-1) unstable; urgency=low
 
   * New upstream release
-  * Use in scripts: proxyOffline=true/false rather than proxyOffline=3/0. 
+  * Use in scripts: proxyOffline=true/false rather than proxyOffline=3/0.
     The latter is no longer valid.
   * control/Build-Depends: added texinfo (for makeinfo)
 
@@ -293,7 +293,7 @@ polipo (0.8.4-1) unstable; urgency=low
 
 polipo (0.8.3-3) unstable; urgency=low
 
-  * polipo.cron.daily: redirect stdout of purge command to /dev/null. 
+  * polipo.cron.daily: redirect stdout of purge command to /dev/null.
     Closes another bug reported by Martin Bretschneider.
   * init.d script now decides to start in online or offline mode by seeing
     if the kernel has a default route.  It no longer takes
@@ -301,7 +301,7 @@ polipo (0.8.3-3) unstable; urgency=low
   * init.d script runs polipo with config file and forbidden file specified.
     This fixes complaints about not being able to expand $HOME.
   * cron.daily script runs polipo with config file and forbidden file
-    specified.  This fixes complaints about not being able to expand $HOME. 
+    specified.  This fixes complaints about not being able to expand $HOME.
   * ip-up/down come into action unless "noppp" is specified in
     /etc/polipo/options
 
@@ -349,4 +349,3 @@ polipo (0.8.2-1) unstable; urgency=low
   * Install the sample config file into /etc/polipo
 
  -- Tom Ellis Huckstep <t.huckstep@bigfoot.com>  Sun, 14 Dec 2003 12:55:35 +0000
-

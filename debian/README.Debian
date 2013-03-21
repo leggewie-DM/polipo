@@ -8,29 +8,26 @@ How to use polipo for Debian
 
 Configure your browser to use a proxy on host 'localhost', port '8123'.
 
-
-  Online documentation
-  --------------------
+Online documentation
+--------------------
 
 Once polipo is running, online documentation is available at
-http://127.0.0.1:8123/doc/.  Alternatively you can find the same information
+http://127.0.0.1:8123/doc/. Alternatively you can find the same information
 on the Polipo website: http://www.pps.jussieu.fr/~jch/software/polipo/manual/
 
+Allowing other computers to access polipo
+-----------------------------------------
 
-  Allowing other computers to access polipo
-  -----------------------------------------
-
-By default polipo will only accept local connections.  If you want other
+By default polipo will only accept local connections. If you want other
 computers on your network to be able to use this machine as a web cache,
-then uncomment the 'proxyAddress' line in /etc/polipo/config.  For
+then uncomment the 'proxyAddress' line in /etc/polipo/config. For
 security's sake you should enable the 'allowedClients' variable and add the
-address of your network, e.g. 'allowedClients = 127.0.0.1, 194.168.42.0/24'. 
+address of your network, e.g. 'allowedClients = 127.0.0.1, 194.168.42.0/24'.
 You might also want to set 'disableLocalInterface=true', otherwise all the
 proxy's users can see what pages the others have been accessing.
 
-
-  Using polipo with a modem or a mobile connection
-  ------------------------------------------------
+Using polipo with a modem or a mobile connection
+------------------------------------------------
 
 Polipo will go on- and offline automatically whenever PPP (modem) or
 other network connections are established or brought down. You can
