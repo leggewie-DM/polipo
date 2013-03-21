@@ -1,3 +1,35 @@
+polipo (1.0.4.1-2) experimental; urgency=low
+
+  [ Jari Aalto ]
+  * Update to DebSrc3 quilt packaging format. Closes: #664380
+  * Remove deprecated dpatch, make sure patches 10 and 30 apply cleanly
+  * Update to Standards-Version 3.9.4 and debhelper 9
+  * Clean up whitespaces from debian/*
+  * Update debian/copyright to Format 1.0
+  * Make sure the init.d script is LSB-compatible
+
+  [ Nelson A. de Oliveira ]
+  * fix permissions set in logrotate control file. Closes: #676855
+
+  [ Bart Martens ]
+  * update watch file to new location
+
+  [ Rolf Leggewie ]
+  * control:
+    - Take over maintenance of polipo and acknowledge previous NMUs
+    - add Donovan Baarda as co-maintainer, welcome aboard
+    - small change in short description to make lintian happy
+    - add VCS packaging information
+  * patches:
+    - some more work to get DebSrc3/quilt working again after Jari's
+      patch has already slightly bitrotted
+    - update the Makefile patch so that files end up in the right places
+  * links: link in www-docs to /usr/share/doc/polipo.  Closes: #539360
+  * README.Debian: drop reference to long-obsolete web page
+  * move build system over to dh7 from cdbs
+
+ -- Rolf Leggewie <foss@rolf.leggewie.biz>  Thu, 21 Mar 2013 11:53:17 +0800
+
 polipo (1.0.4.1-1.2) unstable; urgency=low
 
   * Non-maintainer upload.
