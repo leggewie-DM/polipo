@@ -20,7 +20,7 @@ Subject: Change description
  LOCAL_ROOT = /usr/share/polipo/www
  DISK_CACHE_ROOT = /var/cache/polipo
  
-@@ -63,7 +64,7 @@
+@@ -60,7 +61,7 @@
  
  DEFINES = $(FILE_DEFINES) $(PLATFORM_DEFINES)
  
@@ -29,7 +29,7 @@ Subject: Change description
  
  SRCS = util.c event.c io.c chunk.c atom.c object.c log.c diskcache.c main.c \
         config.c local.c http.c client.c server.c auth.c tunnel.c \
-@@ -102,7 +103,6 @@
+@@ -99,7 +100,6 @@
  	mkdir -p $(TARGET)$(INFODIR)
  	cp -f polipo.man $(TARGET)$(MANDIR)/man1/polipo.1
  	cp polipo.info $(TARGET)$(INFODIR)/
