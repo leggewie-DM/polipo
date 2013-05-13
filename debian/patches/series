@@ -2,3 +2,4 @@
 20_config.patch
 30_Don-t-spuriously-ignore-CNAMEs-after-a-DNS-timeout.patch
 40_CVE-2011-3596.patch
+50_ipv6literallength.patch
