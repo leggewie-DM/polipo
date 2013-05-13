@@ -22,3 +22,5 @@ su -c \
     proxy
 
 [ -f "$PIDFILE" ] && kill -USR2 $(cat "$PIDFILE")
+
+exit 0
