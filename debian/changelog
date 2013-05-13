@@ -1,3 +1,13 @@
+polipo (1.0.4.1-3) unstable; urgency=low
+
+  [ Frank Blendinger ]
+  * exit cron.daily script with 0 status. Closes: #549981
+
+  [ Rolf Leggewie ]
+  * patches: backport Jan Braun's IPv6 DNS patch. Closes: #600678
+
+ -- Rolf Leggewie <foss@rolf.leggewie.biz>  Mon, 13 May 2013 13:19:51 +0800
+
 polipo (1.0.4.1-2) experimental; urgency=low
 
   [ Jari Aalto ]
