@@ -8,23 +8,13 @@ DAEMON=/usr/bin/polipo
 test -x $DAEMON || exit 0
 
 CONFIG_FILE=/etc/polipo/config
-FORBIDDEN_FILE=/etc/polipo/forbidden
 
 NAME=polipo
 
 PIDFILE=/var/run/$NAME/$NAME.pid
-LOGFILE=/var/log/$NAME/$NAME.log
 USER=proxy
 GROUP=proxy
-DAEMON_OPTS="-c $CONFIG_FILE pidFile=$PIDFILE daemonise=true logFile=$LOGFILE"
-
-forbiddenFile() {
-        if [ -f $FORBIDDEN_FILE ] || [ -d $FORBIDDEN_FILE ]; then
-                echo -n $FORBIDDEN_FILE
-        else
-                echo -n /dev/null
-        fi
-}
+DAEMON_OPTS="-c $CONFIG_FILE pidFile=$PIDFILE daemonise=true"
 
 waitForPIDRemove() {
         T=30
@@ -63,14 +53,12 @@ removePIDFile() {
 	fi
 }
 
-DAEMON_OPTS="$DAEMON_OPTS forbiddenFile=`forbiddenFile`"
-
 polipo_start() {
 
 	if alreadyRunning; then
 		echo "$DAEMON already running -- doing nothing"
 		exit
-	fi	
+	fi
 
 	removePIDFile
 
