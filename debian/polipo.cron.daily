@@ -17,7 +17,7 @@ PIDFILE=/var/run/polipo/polipo.pid
 
 [ -f "$PIDFILE" ] && kill -USR1 $(cat "$PIDFILE")
 
-su -c \
+su -s /bin/sh -c \
     "nice polipo -x -c $CONFIG_FILE forbiddenFile=$FORBIDDEN_FILE > /dev/null" \
     proxy
 
