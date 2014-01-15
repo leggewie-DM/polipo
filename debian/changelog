@@ -1,3 +1,12 @@
+polipo (1.0.4.1-5) unstable; urgency=low
+
+  * stop hardcoding some variables in polipo-control script. Closes: #510284
+  * backport upstream commit 136f10f7 (syslogging on amd64). Closes: #729926
+  * add explicit shell call to daily cronjob script. Closes: #734833
+  * control: update to standard 3.9.5. No further changes.
+
+ -- Rolf Leggewie <foss@rolf.leggewie.biz>  Wed, 15 Jan 2014 11:16:50 +0800
+
 polipo (1.0.4.1-4) unstable; urgency=low
 
   * provide sample configs as examples instead of installing them to /etc
