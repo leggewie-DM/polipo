@@ -1,3 +1,10 @@
+polipo (1.0.4.1-6) unstable; urgency=low
+
+  * copyright: bump my copyright to 2014
+  * config: set (overridable) default for logFile. Closes: #735624
+
+ -- Rolf Leggewie <foss@rolf.leggewie.biz>  Sat, 18 Jan 2014 15:35:28 +0800
+
 polipo (1.0.4.1-5) unstable; urgency=low
 
   * stop hardcoding some variables in polipo-control script. Closes: #510284
