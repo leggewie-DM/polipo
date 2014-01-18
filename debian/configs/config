@@ -3,3 +3,4 @@
 # and "polipo -v" for variables you can tweak and further information.
 
 logSyslog = true
+logFile = /var/log/polipo/polipo.log
