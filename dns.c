@@ -354,10 +354,8 @@ do_gethostbyname(char *origname,
         request.object = object;
         chandler = conditionWait(&object->condition, dnsHandler,
                                  sizeof(request), &request);
-        if(chandler == NULL) {
-            rc = ENOMEM;
+        if(chandler == NULL)
             goto fail;
-        }
         return 1;
     }
 #endif
@@ -445,11 +443,11 @@ dnsDelayedNotify(int error, GethostbynameRequestPtr request)
 AtomPtr
 rfc2732(AtomPtr name)
 {
-    char buf[38];
+    char buf[40]; /* 8*4 (hexdigits) + 7 (colons) + 1 ('\0') */
     int rc;
     AtomPtr a = NULL;
 
-    if(name->length < 38 && 
+    if(name->length < 40+2 && 
        name->string[0] == '[' && name->string[name->length - 1] == ']') {
         struct in6_addr in6a;
         memcpy(buf, name->string + 1, name->length - 2);
@@ -646,7 +644,9 @@ really_do_gethostbyname(AtomPtr name, ObjectPtr object)
     if(host == NULL) {
         switch(h_errno) {
         case HOST_NOT_FOUND: error = EDNS_HOST_NOT_FOUND; break;
+#ifdef NO_ADDRESS
         case NO_ADDRESS: error = EDNS_NO_ADDRESS; break;
+#endif
         case NO_RECOVERY: error = EDNS_NO_RECOVERY; break;
         case TRY_AGAIN: error = EDNS_TRY_AGAIN; break;
         default: error = EUNKNOWN; break;
@@ -817,7 +817,7 @@ dnsTimeoutHandler(TimeEventHandlerPtr event)
     /* People are reporting that this does happen.  And I have no idea why. */
     if(!queryInFlight(query)) {
         do_log(L_ERROR, "BUG: timing out martian query (%s, flags: 0x%x).\n",
-               query->name->string, (unsigned)object->flags);
+               scrub(query->name->string), (unsigned)object->flags);
         return 1;
     }
 
@@ -1146,7 +1146,7 @@ dnsReplyHandler(int abort, FdEventHandlerPtr event)
                 dnsGethostbynameFallback(id, message);
                 return 0;
             } else {
-                message = internAtomError(-rc, NULL);
+                message = internAtom(pstrerror(-rc));
             }
         } else {
             assert(name != NULL && id >= 0 && af >= 0);
@@ -1181,9 +1181,18 @@ dnsReplyHandler(int abort, FdEventHandlerPtr event)
         } else
             releaseAtom(value);
     } else if(af == 0) {
+        /* Ignore errors in this case. */
+        if(query->inet4 && query->inet4->length == 0) {
+            releaseAtom(query->inet4);
+            query->inet4 = NULL;
+        }
+        if(query->inet6 && query->inet6->length == 0) {
+            releaseAtom(query->inet6);
+            query->inet6 = NULL;
+        }
         if(query->inet4 || query->inet6) {
             do_log(L_WARN, "Host %s has both %s and CNAME -- "
-                   "ignoring CNAME.\n", query->name->string,
+                   "ignoring CNAME.\n", scrub(query->name->string),
                    query->inet4 ? "A" : "AAAA");
             releaseAtom(value);
             value = internAtom("");
@@ -1254,7 +1263,8 @@ dnsReplyHandler(int abort, FdEventHandlerPtr event)
         object->age = current_time.tv_sec;
         object->flags &= ~(OBJECT_INITIAL | OBJECT_INPROGRESS);
     } else {
-        do_log(L_WARN, "DNS object ex nihilo for %s.\n", query->name->string);
+        do_log(L_WARN, "DNS object ex nihilo for %s.\n",
+               scrub(query->name->string));
     }
     
     removeQuery(query);
@@ -1388,7 +1398,7 @@ static int
 labelsToString(char *buf, int offset, int n, char *d, int m, int *j_return)
 {
     int i = offset, j, k;
-    int ll;
+    int ll, rc;
 
     j = 0;
     while(1) {
@@ -1403,7 +1413,9 @@ labelsToString(char *buf, int offset, int n, char *d, int m, int *j_return)
             if(i >= n) return -1;
             o = (ll & ~(3 << 6)) << 8 | *(unsigned char*)&buf[i];
             i++;
-            labelsToString(buf, o, n, &d[j], m - j, &k);
+            rc = labelsToString(buf, o, n, &d[j], m - j, &k);
+            if(rc < 0)
+                return -1;
             j += k;
             break;
         } else if((ll & (3 << 6)) == 0) {
@@ -1589,7 +1601,8 @@ do { \
                    (type == 28 && rdlength != 16)) {
                     do_log(L_ERROR, 
                            "DNS: %s: unexpected length %d of %s record.\n",
-                           name->string, rdlength, type == 1 ? "A" : "AAAA");
+                           scrub(name->string),
+                           rdlength, type == 1 ? "A" : "AAAA");
                     error = EDNS_INVALID;
                     if(rdlength <= 0 || rdlength >= 32)
                         goto fail;
@@ -1597,7 +1610,7 @@ do { \
                 }
                 if(af == 0) {
                     do_log(L_WARN, "DNS: %s: host has both A and CNAME -- "
-                           "ignoring CNAME.\n", name->string);
+                           "ignoring CNAME.\n", scrub(name->string));
                     addr_index = 0;
                     af = -1;
                 }
@@ -1658,7 +1671,8 @@ do { \
                        memcmp(addresses + 1, tmp, kk) != 0) {
                         do_log(L_WARN, "DNS: "
                                "%s: host has multiple CNAMEs -- "
-                               "ignoring subsequent.\n", name->string);
+                               "ignoring subsequent.\n",
+                               scrub(name->string));
 
                     }
                     goto cont;

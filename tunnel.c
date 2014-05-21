@@ -75,6 +75,13 @@ circularBufferEmpty(CircularBufferPtr buf)
      return buf->head == buf->tail;
 }
 
+static void
+logTunnel(TunnelPtr tunnel, int blocked)
+{
+    do_log(L_TUNNEL,"tunnel %s:%d %s\n", tunnel->hostname->string, tunnel->port,
+	   blocked ? "blocked" : "allowed");
+}
+
 static TunnelPtr
 makeTunnel(int fd, char *buf, int offset, int len)
 {
@@ -132,6 +139,14 @@ do_tunnel(int fd, char *buf, int offset, int len, AtomPtr url)
         return;
     }
 
+    if(proxyOffline) {
+        do_log(L_INFO, "Attemted CONNECT when disconnected.\n");
+        releaseAtom(url);
+        tunnelError(tunnel, 502,
+                    internAtom("Cannot CONNECT when disconnected."));
+        return;
+    }
+
     p = memrchr(url->string, ':', url->length);
     q = NULL;
     if(p)
@@ -155,6 +170,16 @@ do_tunnel(int fd, char *buf, int offset, int len, AtomPtr url)
         return;
     }
     tunnel->port = port;
+    
+    if (tunnelIsMatched(url->string, url->length, 
+			tunnel->hostname->string, tunnel->hostname->length)) {
+        releaseAtom(url);
+        tunnelError(tunnel, 404, internAtom("Forbidden tunnel"));
+	logTunnel(tunnel,1);
+        return;
+    }
+    
+    logTunnel(tunnel,0);
     
     releaseAtom(url);
 
@@ -246,11 +271,14 @@ tunnelHandlerParent(int fd, TunnelPtr tunnel)
         goto fail;
     }
 
-    n = snnprintf(tunnel->buf1.buf, tunnel->buf1.tail,
-                  CHUNK_SIZE - tunnel->buf1.tail,
-                  "CONNECT %s:%d HTTP/1.1"
-                  "\r\n\r\n",
+    n = snnprintf(tunnel->buf1.buf, tunnel->buf1.tail, CHUNK_SIZE,
+                  "CONNECT %s:%d HTTP/1.1",
                   tunnel->hostname->string, tunnel->port);
+    if (parentAuthCredentials)
+        n = buildServerAuthHeaders(tunnel->buf1.buf, n, CHUNK_SIZE,
+                                   parentAuthCredentials);
+    n = snnprintf(tunnel->buf1.buf, n, CHUNK_SIZE, "\r\n\r\n");
+
     if(n < 0) {
         message = "Buffer overflow";
         goto fail;
@@ -434,7 +462,7 @@ tunnelRead1Handler(int status,
 {
     TunnelPtr tunnel = request->data;
     if(status) {
-        if(status < 0)
+        if(status < 0 && status != -EPIPE && status != -ECONNRESET)
             do_log_error(L_ERROR, -status, "Couldn't read from client");
         tunnel->flags |= TUNNEL_EOF1;
         goto done;
@@ -454,7 +482,7 @@ tunnelRead2Handler(int status,
                    FdEventHandlerPtr event, StreamRequestPtr request)
 {
     TunnelPtr tunnel = request->data;
-    if(status) {
+    if(status && status != -EPIPE && status != -ECONNRESET) {
         if(status < 0)
             do_log_error(L_ERROR, -status, "Couldn't read from server");
         tunnel->flags |= TUNNEL_EOF2;

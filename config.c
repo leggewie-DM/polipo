@@ -571,7 +571,7 @@ parseAtom(char *buf, int offset, AtomPtr *value_return, int insensitive)
 
     if(escape) {
         s = malloc(i - y0);
-        if(buf == NULL) return -1;
+        if(s == NULL) return -1;
         k = 0;
         j = y0;
         while(j < i) {
@@ -815,15 +815,15 @@ int
 parseConfigFile(AtomPtr filename)
 {
     char buf[512];
-    int rc, lineno;
+    int lineno;
     FILE *f;
 
     if(!filename || filename->length == 0)
         return 0;
     f = fopen(filename->string, "r");
     if(f == NULL) {
-        do_log(L_ERROR, "Couldn't open config file %s: %d.\n",
-               filename->string, errno);
+        do_log_error(L_ERROR, errno, "Couldn't open config file %s",
+                     filename->string);
         return -1;
     }
 
@@ -835,7 +835,7 @@ parseConfigFile(AtomPtr filename)
             fclose(f);
             return 1;
         }
-        rc = parseConfigLine(buf, filename->string, lineno, 0);
+        parseConfigLine(buf, filename->string, lineno, 0);
         lineno++;
     }
 }
