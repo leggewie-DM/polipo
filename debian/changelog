@@ -1,3 +1,19 @@
+polipo (1.1.1-1) unstable; urgency=medium
+
+  * release newest upstream version 1.1.1.  Closes: #746750
+    - use regerror to improve error reporting. Closes: #585766
+    - correct return value from processObject in error case. LP: #988780
+    - resume interrupted file download properly. Closes: #517479
+    - vastly improve stability. LP: #1055418,  LP: #988780, LP: #1168593
+      Closes: #684742, Closes: #307801, Closes: #432561, Closes: #646709
+    - handle non-existent host properly. Closes: #655851
+    - Don't revalidate objects >= CHUNK_SIZE that aren't in the disk cache.
+      Closes: #610199
+  * drop patches included upstream and rebase the rest
+  * update watch file
+
+ -- Rolf Leggewie <foss@rolf.leggewie.biz>  Fri, 06 Jun 2014 15:29:19 +0200
+
 polipo (1.0.4.1-6) unstable; urgency=low
 
   * copyright: bump my copyright to 2014
