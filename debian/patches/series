@@ -1,2 +1,3 @@
 10_makefile.patch
 20_config.patch
+30-debian-logfile-path.patch

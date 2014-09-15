@@ -1,0 +1,16 @@
+Author: Rolf Leggewie
+Subject: change logfile to Debian default
+
+Index: polipo/log.c
+===================================================================
+--- polipo.orig/log.c	2014-05-21 19:31:57.241940608 +0200
++++ polipo/log.c	2014-09-15 06:27:54.462997670 +0200
+@@ -106,7 +106,7 @@
+ initLog(void)
+ {
+     if(daemonise && logFile == NULL && !logSyslog)
+-        logFile = internAtom("/var/log/polipo");
++        logFile = internAtom("/var/log/polipo/polipo.log");
+ 
+     if(logFile != NULL && logFile->length > 0) {
+         FILE *f;
