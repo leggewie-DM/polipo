@@ -1,3 +1,11 @@
+polipo (1.1.1-2) unstable; urgency=low
+
+  * patches: observe Debian default location for logFile even in the
+    absence of an explicitly set value
+  * rules: enable ALL hardening compile options. Closes: #751013
+
+ -- Rolf Leggewie <foss@rolf.leggewie.biz>  Mon, 15 Sep 2014 12:48:59 +0800
+
 polipo (1.1.1-1) unstable; urgency=medium
 
   * release newest upstream version 1.1.1.  Closes: #746750
