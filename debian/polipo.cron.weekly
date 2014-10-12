@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# script to handle trimming of the polipo cache
+
+set -e
+
+# set reasonable defaults
+POLIPO_TRIM=0
+POLIPO_TARGET_SIZE=256M
+diskCacheRoot=/var/cache/polipo
+
+# read configuration values
+[ -r /etc/polipo/trim ] || exit 0
+. /etc/polipo/trim
+. /etc/polipo/config
+
+# stop if the package was removed but not purged
+[ -x /usr/lib/polipo/polipo_trimcache ] || exit 0
+
+# now do the trimming if requested
+[ $POLIPO_TRIM = 1 ] && python /usr/lib/polipo/polipo_trimcache $diskCacheRoot $POLIPO_TARGET_SIZE
+
+exit 0

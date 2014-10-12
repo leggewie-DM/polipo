@@ -1,3 +1,2 @@
-debian/helper-scripts/polipo-control usr/lib/polipo
-debian/configs/options	etc/polipo
-debian/configs/config	etc/polipo
+debian/helper-scripts/* usr/lib/polipo
+debian/configs/*	etc/polipo
