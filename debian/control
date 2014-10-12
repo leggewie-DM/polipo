@@ -12,6 +12,7 @@ Vcs-Browser: http://git.debian.org/?p=collab-maint/polipo.git
 Package: polipo
 Architecture: any
 Depends: lsb-base, ${shlibs:Depends}, ${misc:Depends}
+Recommends: dnsmasq | pdnsd | unbound
 Description: lightweight, caching web proxy
  Polipo is a caching web proxy (a web cache) designed to be used by one
  person or a small group of people. It is similar in spirit to WWWOFFLE, but
