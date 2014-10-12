@@ -1,3 +1,9 @@
+polipo (1.1.1-3) unstable; urgency=low
+
+  * drop su-call in logrotate snippet (unb0rk logrotation)
+
+ -- Rolf Leggewie <foss@rolf.leggewie.biz>  Sun, 12 Oct 2014 14:33:03 +0800
+
 polipo (1.1.1-2) unstable; urgency=low
 
   * patches: observe Debian default location for logFile even in the
