@@ -3,3 +3,12 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
 %:
 	dh $@
+
+override_dh_auto_install:
+	dh_auto_install --destdir=debian/polipo
+
+override_dh_installdocs:
+	dh_installdocs --link-doc=polipo
+
+override_dh_strip:
+	dh_strip --dbg-package=polipo-dbg

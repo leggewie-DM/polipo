@@ -39,3 +39,15 @@ Description: lightweight, caching web proxy
  .
  Optionally, Polipo can use a technique known as Poor Man's Multiplexing
  to reduce latency.
+
+Package: polipo-dbg
+Section: debug
+Priority: extra
+Architecture: any
+Depends: polipo (= ${binary:Version}), ${shlibs:Depends}, ${misc:Depends}
+Description: debug package for polipo
+ Polipo is a caching web proxy (a web cache) designed to be used by one
+ person or a small group of people. It is similar in spirit to WWWOFFLE, but
+ the implementation techniques are more like the ones used by Squid.
+ .
+ This package contains the debugging symbols for polipo.
