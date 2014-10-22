@@ -1,4 +1,5 @@
 /var/log/polipo/polipo.log {
+	su proxy adm
 	rotate 7
 	daily
 	missingok
