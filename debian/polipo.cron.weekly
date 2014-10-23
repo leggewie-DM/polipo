@@ -12,7 +12,10 @@ diskCacheRoot=/var/cache/polipo
 # read configuration values
 [ -r /etc/polipo/trim ] || exit 0
 . /etc/polipo/trim
-. /etc/polipo/config
+
+# source'ing the polipo config file is a bit more involved
+# since it might contain spaces. Read $diskCacheRoot variable
+eval "$(sed s/\ //g < /etc/polipo/config)"
 
 # stop if the package was removed but not purged
 [ -x /usr/lib/polipo/polipo_trimcache ] || exit 0
