@@ -16,6 +16,18 @@ USER=proxy
 GROUP=proxy
 DAEMON_OPTS="-c $CONFIG_FILE pidFile=$PIDFILE daemonise=true"
 
+offlineMode() {
+        # At the moment this only depends on the presence of a default route
+        # Eventually this will be configurable via $OPTION_FILE
+        if /sbin/route -n | grep  ^0.0.0.0 > /dev/null; then
+                # We have a default route - go online
+                echo -n false
+        else
+                # We don't have a default route - go offline
+                echo -n true
+        fi
+}
+
 waitForPIDRemove() {
         T=30
         for i in `seq 1 $T`; do
@@ -54,6 +66,7 @@ removePIDFile() {
 }
 
 polipo_start() {
+        DAEMON_OPTS="$DAEMON_OPTS proxyOffline=`offlineMode`"
 
 	if alreadyRunning; then
 		echo "$DAEMON already running -- doing nothing"
@@ -71,6 +84,30 @@ polipo_stop() {
                 --oknodo --exec $DAEMON
 }
 
+polipo_go_online() {
+        DAEMON_OPTS="$DAEMON_OPTS proxyOffline=false"
+
+        test ! -f $PIDFILE && return
+
+        start-stop-daemon --stop --quiet --pidfile \
+                 $PIDFILE --oknodo --exec $DAEMON
+        waitForPIDRemove
+        start-stop-daemon --start --quiet --pidfile $PIDFILE \
+                 --chuid $USER:$GROUP --exec $DAEMON -- $DAEMON_OPTS
+}
+
+polipo_go_offline() {
+        DAEMON_OPTS="$DAEMON_OPTS proxyOffline=true"
+
+        test ! -f $PIDFILE && return
+
+        start-stop-daemon --stop --quiet --pidfile \
+                 $PIDFILE --oknodo --exec $DAEMON
+        waitForPIDRemove
+        start-stop-daemon --start --quiet --pidfile $PIDFILE \
+                 --chuid $USER:$GROUP --exec $DAEMON -- $DAEMON_OPTS
+}
+
 case "$1" in
   start)
         polipo_start
@@ -83,10 +120,16 @@ case "$1" in
         waitForPIDRemove
         polipo_start
         ;;
+  go-offline)
+        polipo_go_offline
+        ;;
+  go-online)
+        polipo_go_online
+        ;;
   *)
         N=polipo-control
-        echo "Usage: $N {start|stop}" >&2
-        exit 1         
+        echo "Usage: $N {start|stop|go-offline|go-online}" >&2
+        exit 1
 esac
 
 exit 0
