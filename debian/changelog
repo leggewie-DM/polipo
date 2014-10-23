@@ -1,3 +1,10 @@
+polipo (1.1.1-5) unstable; urgency=medium
+
+  * make the weekly cron call more robust
+    handle spaces in the polipo config file properly
+
+ -- Rolf Leggewie <foss@rolf.leggewie.biz>  Thu, 23 Oct 2014 12:49:28 +0900
+
 polipo (1.1.1-4) unstable; urgency=medium
 
   * reintroduce call to su in logrotation dropped in 1.1.1-3
