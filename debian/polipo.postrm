@@ -10,34 +10,16 @@ LOG_DIR=/var/log/polipo
 IPUP_D=/etc/ppp/ip-up.d
 IPDOWN_D=/etc/ppp/ip-down.d
 
-rm_conffile() {
-    local PKGNAME="$1" # Unused
-    local CONFFILE="$2"
-
-    if [ -f "$CONFFILE".dpkg-del ]; then
-        mv -f "$CONFFILE".dpkg-del "$CONFFILE"
-    fi
-}
-
 case "$1" in
     purge)
 
-# Remove polipo related directories
+	# Remove polipo related directories
 	for DIR in "$CACHE_DIR" "$PID_DIR" "$LOG_DIR"; do
 	    echo -n "Purging $DIR..."
 	    rm -rf "$DIR"
 	    echo " done"
 	done
 
-    ;;
-
-    abort-install|abort-upgrade)
-        if dpkg --compare-versions "$2" le 1.0.4.1-1; then
-            rm_conffile polipo /etc/ppp/ip-up.d/1polipo
-            rm_conffile polipo /etc/ppp/ip-down.d/1polipo
-            rm_conffile polipo /etc/network/if-up.d/01polipo
-            rm_conffile polipo /etc/network/if-down.d/01polipo
-        fi
     ;;
 
     remove|upgrade|failed-upgrade|disappear)

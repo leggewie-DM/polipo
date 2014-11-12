@@ -9,26 +9,9 @@ LOG_DIR=/var/log/polipo
 IPUP_D=/etc/ppp/ip-up.d
 IPDOWN_D=/etc/ppp/ip-down.d
 
-rm_conffile() {
-    local PKGNAME="$1" # Unused
-    local CONFFILE="$2"
-    if [ -f "$CONFFILE".dpkg-del ]; then
-        rm -f "$CONFFILE".dpkg-del
-    fi
-}
-
 case "$1" in
     configure)
-
-        # delete obsolete conffiles
-        if dpkg --compare-versions "$2" le 1.0.4.1-1; then
-            rm_conffile polipo /etc/ppp/ip-up.d/1polipo
-            rm_conffile polipo /etc/ppp/ip-down.d/1polipo
-            rm_conffile polipo /etc/network/if-up.d/01polipo
-            rm_conffile polipo /etc/network/if-down.d/01polipo
-        fi
-
-# Creating needed directories
+	# Creating needed directories
         mkdir -p "$CACHE_DIR"
 	chown proxy:proxy "$CACHE_DIR"
 	chmod 750 "$CACHE_DIR"
@@ -39,7 +22,6 @@ case "$1" in
 	mkdir -p "$LOG_DIR"
 	chown proxy:adm "$LOG_DIR"
 	chmod 2755 "$LOG_DIR"
-
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
