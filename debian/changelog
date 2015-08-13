@@ -1,3 +1,10 @@
+polipo (1.1.1-6) unstable; urgency=medium
+
+  * stop special-casing a long-gone pkg version in the maintainer scripts
+  * copyright: update my copyright to 2015
+
+ -- Rolf Leggewie <foss@rolf.leggewie.biz>  Thu, 13 Aug 2015 16:06:50 +0800
+
 polipo (1.1.1-5) unstable; urgency=medium
 
   * make the weekly cron call more robust
